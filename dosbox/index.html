@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>8086 Assembly Runner (Live VM, js-dos v8)</title>
+  <title>8086 Assembly Runner (Uploads persisted, js-dos v8)</title>
 
   <!-- js-dos v8 CDN -->
   <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
@@ -14,7 +14,7 @@
     .grid { display: grid; grid-template-columns: 1fr 820px; gap: 16px; align-items: start; }
     textarea { width: 100%; height: 560px; font-family: Consolas, Menlo, monospace; font-size: 14px; }
     #dosbox { width: 800px; height: 600px; border: 1px solid #ccc; }
-    #runBtn, #resetBtn { padding: 8px 14px; font-size: 16px; }
+    #runBtn, #clearBtn { padding: 8px 14px; font-size: 16px; }
     .bar { display:flex; gap:12px; align-items:center; margin:8px 0 0; flex-wrap: wrap; }
     .small { color:#666; font-size: 12px; }
     .uploads { margin-top: 8px; }
@@ -27,8 +27,9 @@
 <body>
   <h1>8086 Assembly Runner</h1>
   <p class="small">
-    Paste TASM-style source (<code>.model small</code> etc.), optionally upload files (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>), then click <b>Run</b>.
-    The emulator stays alive between runs; your program’s generated files remain until you click <b>Reset VM</b>. Your source text is saved locally.
+    Paste TASM-style source (<code>.model small</code> etc.), upload any files once, then click <b>Run</b>.  
+    A fresh DOS VM starts each time; your uploaded files are auto-injected from browser storage.  
+    Uploading the same name again overwrites the stored copy. Your source text is saved locally on each run.
   </p>
 
   <div class="grid">
@@ -37,12 +38,12 @@
       <div class="bar">
         <input type="file" id="fileInput" multiple />
         <button id="runBtn">Run</button>
-        <button id="resetBtn" title="Recreate a fresh DOS VM (does not clear your editor text)">Reset VM</button>
+        <button id="clearBtn" title="Delete all persisted uploaded files">Clear stored files</button>
         <span id="status" class="small"></span>
       </div>
 
       <div class="uploads">
-        <span class="small">Files to inject/overwrite in <span class="chip">C:\</span> (original → DOS 8.3):</span>
+        <span class="small">Stored files for <span class="chip">C:\</span> (original → DOS 8.3):</span>
         <ul id="fileList"></ul>
       </div>
     </div>
@@ -50,7 +51,7 @@
     <div>
       <div id="dosbox"></div>
       <p class="small">
-        Tip: refer to uploaded files by their DOS 8.3 names (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>).
+        Refer to files by their DOS 8.3 names (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>).  
         Keyboard & mouse work inside the DOS frame—click inside to focus.
       </p>
     </div>
@@ -60,23 +61,24 @@
   if (!window.__asmRunnerInit__) {
     window.__asmRunnerInit__ = true;
 
-    const elCode   = document.getElementById('code');
-    const elRun    = document.getElementById('runBtn');
-    const elReset  = document.getElementById('resetBtn');
-    const elStat   = document.getElementById('status');
-    const elDos    = document.getElementById('dosbox');
-    const elInput  = document.getElementById('fileInput');
-    const elList   = document.getElementById('fileList');
+    // Elements
+    const elCode  = document.getElementById('code');
+    const elRun   = document.getElementById('runBtn');
+    const elClear = document.getElementById('clearBtn');
+    const elStat  = document.getElementById('status');
+    const elDos   = document.getElementById('dosbox');
+    const elList  = document.getElementById('fileList');
 
-    const LS_KEY = "asm-editor-text-v1";
+    const LS_KEY  = "asm-editor-text-v1";
     const encoder = new TextEncoder();
 
+    // Default starter code
     const DEFAULT_SRC = [
       "; Sample TASM program (EXE) for 8086",
       ".model small",
       ".stack 100h",
       ".data",
-      "msg db 'Hello from TASM in a live VM!$'",
+      "msg db 'Hello from TASM!$'",
       ".code",
       "main proc",
       "    mov ax, @data",
@@ -91,8 +93,7 @@
     ].join("\n");
     elCode.value = localStorage.getItem(LS_KEY) || DEFAULT_SRC;
 
-    // Uploads kept in-memory: { original, dosName, bytes }
-    let uploads = [];
+    // -------- DOS 8.3 mapping --------
     function toDos83(name) {
       const idx = name.lastIndexOf(".");
       let base = (idx >= 0 ? name.slice(0, idx) : name).toUpperCase();
@@ -102,45 +103,113 @@
       ext  = clean(ext).slice(0, 3);
       return ext ? `${base}.${ext}` : base;
     }
-    elInput.addEventListener('change', async (e) => {
+
+    // -------- IndexedDB persistence for uploaded files --------
+    // DB schema: db "asm-dos-files" / store "files" with keyPath "dosName"
+    // Value: { original: string, dosName: string, bytes: ArrayBuffer }
+    let db = null;
+
+    function idbOpen() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open("asm-dos-files", 1);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains("files")) {
+            db.createObjectStore("files", { keyPath: "dosName" });
+          }
+        };
+        req.onsuccess = () => { db = req.result; resolve(db); };
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function idbPut(fileRec) {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("files", "readwrite");
+        const store = tx.objectStore("files");
+        const req = store.put(fileRec);
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function idbGetAll() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("files", "readonly");
+        const store = tx.objectStore("files");
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    function idbClear() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction("files", "readwrite");
+        const store = tx.objectStore("files");
+        const req = store.clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    // Load persisted files to show list
+    async function refreshListUI() {
+      const files = await idbGetAll();
+      elList.innerHTML = "";
+      files.forEach(f => {
+        const li = document.createElement("li");
+        li.textContent = `${f.original}  →  ${f.dosName}`;
+        elList.appendChild(li);
+      });
+      elStat.textContent = `${files.length} file(s) stored`;
+    }
+
+    // Handle uploads → persist (overwrite on same DOS name), then refresh list
+    document.getElementById('fileInput').addEventListener('change', async (e) => {
       const files = Array.from(e.target.files || []);
       if (!files.length) return;
-      const reads = files.map(f => new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res({ file: f, bytes: new Uint8Array(r.result) });
-        r.onerror = () => rej(r.error || new Error("Read failed: " + f.name));
-        r.readAsArrayBuffer(f);
-      }));
+      elStat.textContent = "Reading files...";
       try {
-        const got = await Promise.all(reads);
-        for (const { file, bytes } of got) {
-          let dos = toDos83(file.name);
-          let candidate = dos, i = 1;
-          while (uploads.some(u => u.dosName === candidate)) {
-            const dot = dos.lastIndexOf(".");
-            const b = dot >= 0 ? dos.slice(0, dot) : dos;
-            const e2 = dot >= 0 ? dos.slice(dot) : "";
-            const suffix = String(i++).slice(-1);
-            candidate = (b.slice(0, Math.max(0, 8 - 1)) + suffix) + e2;
-          }
-          const idxExisting = uploads.findIndex(u => u.original === file.name);
-          if (idxExisting >= 0) uploads[idxExisting] = { original: file.name, dosName: candidate, bytes };
-          else uploads.push({ original: file.name, dosName: candidate, bytes });
+        await idbOpen(); // ensure DB
+        // Build a set of existing DOS names to avoid collisions (we'll allow overwrite on same dosName)
+        const existing = new Set((await idbGetAll()).map(f => f.dosName));
+
+        for (const file of files) {
+          const dos = toDos83(file.name);
+          // Read as ArrayBuffer
+          const buf = await file.arrayBuffer();
+          // Store (overwrite if same dosName)
+          await idbPut({ original: file.name, dosName: dos, bytes: buf });
+          existing.add(dos);
         }
-        elList.innerHTML = "";
-        for (const u of uploads) {
-          const li = document.createElement("li");
-          li.textContent = `${u.original}  →  ${u.dosName}`;
-          elList.appendChild(li);
-        }
-        elStat.textContent = `${uploads.length} file(s) staged`;
+        await refreshListUI();
+        elStat.textContent = "Files stored. (They’ll be auto-loaded on Run)";
       } catch (err) {
         console.error(err);
-        elStat.textContent = "Error reading files";
+        elStat.textContent = "Error storing files";
       }
     });
 
-    // Toolchain (fetched once)
+    // Clear button
+    elClear.addEventListener('click', async () => {
+      try {
+        await idbOpen();
+        await idbClear();
+        await refreshListUI();
+        elStat.textContent = "Stored files cleared.";
+      } catch (err) {
+        console.error(err);
+        elStat.textContent = "Error clearing files";
+      }
+    });
+
+    // Initialize DB and list on load
+    (async () => {
+      try { await idbOpen(); await refreshListUI(); } catch {}
+    })();
+
+    // -------- Toolchain (from repo) --------
     let tasmBuf = null, tlinkBuf = null, dpmiBuf = null, rtmBuf = null;
     async function preloadTools() {
       const get = async (path, opt = false) => {
@@ -156,8 +225,8 @@
       ]);
     }
 
-    // Start straight in DOS with C: mounted
-    const BASIC_CONF = `
+    // -------- DOS config: fresh VM each run, auto-run BUILD --------
+    const DOS_CONF = `
 [sdl]
 fullscreen=false
 
@@ -165,58 +234,12 @@ fullscreen=false
 @echo off
 mount c .
 c:
-echo Live DOS VM ready
+echo js-dos (TASM/TLINK) ready
+BUILD
 `;
 
-    // v8 Player API
-    let props = null; // player
-    let ci    = null; // command interface
-
-    function bootVm() {
-      return new Promise((resolve) => {
-        props = Dos(elDos, {
-          dosboxConf: BASIC_CONF,
-          onEvent: (event, payload) => {
-            if (event === "ci-ready") {
-              ci = payload;
-              resolve();
-            }
-          }
-        });
-      });
-    }
-
-    // Helpers
-    const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-    async function focusDosCanvas() {
-      // Try to focus the canvas so the emulator accepts input
-      const canvas = elDos.querySelector("canvas");
-      if (canvas && canvas.focus) canvas.focus();
-      // Some browsers need a tiny delay after focus
-      await sleep(50);
-    }
-
-    async function fsWrite(path, bytes) {
-      await ci.fsWriteFile(path, bytes);
-    }
-
-    async function typeCommand(cmd) {
-      // Ensure DOS has focus and give it a moment
-      await focusDosCanvas();
-      // Clear any partial input first (press Enter)
-      ci.simulateKeyPress(13);
-      await sleep(30);
-      // Send the whole command (uppercase/lowercase both fine)
-      for (const ch of (cmd + "\r")) {
-        ci.simulateKeyPress(ch.charCodeAt(0));
-        // Tiny throttle helps reliability on some browsers
-        await sleep(2);
-      }
-    }
-
-    function buildBatBytes() {
-      const lines = [
+    function buildBat() {
+      return encoder.encode([
         "@echo off",
         "echo Assembling MAIN.ASM (TASM)...",
         "TASM /q MAIN.ASM > BUILD.LOG",
@@ -234,73 +257,67 @@ echo Live DOS VM ready
         ":END",
         "echo.",
         "echo ===== DONE ====="
-      ].join("\r\n");
-      return encoder.encode(lines);
+      ].join("\r\n"));
     }
 
-    async function ensureVm() {
-      if (!ci) await bootVm();
+    // Start a fresh VM with provided files
+    function startDosWith(initFs) {
+      elDos.innerHTML = ""; // reset container
+      return new Promise((resolve) => {
+        Dos(elDos, {
+          wdosboxUrl: "https://v8.js-dos.com/latest/wdosbox.js",
+          dosboxConf: DOS_CONF,
+          initFs,
+          onEvent: (event) => {
+            if (event === "ci-ready") resolve();
+          }
+        });
+      });
     }
 
-    async function ensureToolchain() {
-      if (!tasmBuf || !tlinkBuf) await preloadTools();
-      await fsWrite("TASM.EXE",  tasmBuf);
-      await fsWrite("TLINK.EXE", tlinkBuf);
-      if (dpmiBuf) await fsWrite("DPMI16BI.OVL", dpmiBuf);
-      if (rtmBuf)  await fsWrite("RTM.EXE",      rtmBuf);
-    }
-
-    async function runBuild(sourceText) {
-      localStorage.setItem(LS_KEY, sourceText);
-      await ensureVm();
-      await ensureToolchain();
-
-      await fsWrite("MAIN.ASM",  encoder.encode(sourceText));
-      await fsWrite("BUILD.BAT", buildBatBytes());
-      for (const u of uploads) await fsWrite(u.dosName, u.bytes);
-
-      await typeCommand("CALL BUILD");
-    }
-
+    // RUN: gather persisted files → boot VM fresh → auto BUILD
     elRun.addEventListener('click', async () => {
       try {
         elRun.disabled = true;
-        elReset.disabled = true;
-        elStat.textContent = "Running...";
-        await runBuild(elCode.value || "");
-        elStat.textContent = "Done. (VM is still running — edit and Run again)";
+        elStat.textContent = "Preparing files...";
+
+        // Save editor text
+        const sourceText = elCode.value || "";
+        localStorage.setItem(LS_KEY, sourceText);
+
+        // Ensure toolchain
+        if (!tasmBuf || !tlinkBuf) await preloadTools();
+
+        // Get persisted uploads from IndexedDB
+        await idbOpen();
+        const stored = await idbGetAll(); // [{original, dosName, bytes(ArrayBuffer)}]
+        await refreshListUI();
+
+        // Build init FS
+        const initFs = [
+          { path: "TASM.EXE",  contents: tasmBuf },
+          { path: "TLINK.EXE", contents: tlinkBuf },
+          { path: "MAIN.ASM",  contents: encoder.encode(sourceText) },
+          { path: "BUILD.BAT", contents: buildBat() }
+        ];
+        if (dpmiBuf) initFs.push({ path: "DPMI16BI.OVL", contents: dpmiBuf });
+        if (rtmBuf)  initFs.push({ path: "RTM.EXE",      contents: rtmBuf  });
+
+        // Add persisted files
+        for (const f of stored) {
+          initFs.push({ path: f.dosName, contents: new Uint8Array(f.bytes) });
+        }
+
+        elStat.textContent = "Starting DOS...";
+        await startDosWith(initFs);
+        elStat.textContent = "Running in DOS...";
       } catch (e) {
         console.error(e);
         elStat.textContent = "Error: " + (e?.message || e);
       } finally {
         elRun.disabled = false;
-        elReset.disabled = false;
       }
     });
-
-    elReset.addEventListener('click', async () => {
-      try {
-        elRun.disabled = true;
-        elReset.disabled = true;
-        elStat.textContent = "Resetting VM...";
-        if (props) await props.stop();
-        props = null; ci = null;
-        await bootVm();
-        elStat.textContent = "Fresh VM ready.";
-      } catch (e) {
-        console.error(e);
-        elStat.textContent = "Error resetting VM";
-      } finally {
-        elRun.disabled = false;
-        elReset.disabled = false;
-      }
-    });
-
-    (async () => {
-      elStat.textContent = "Starting VM...";
-      await bootVm();
-      elStat.textContent = "VM ready.";
-    })();
   }
   </script>
 </body>
