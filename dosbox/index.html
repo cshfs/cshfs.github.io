@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>8086 Assembly Runner (Live VM: TASM/TLINK, uploads)</title>
+  <title>8086 Assembly Runner (Live VM, js-dos v8)</title>
 
   <!-- js-dos v8 CDN -->
   <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
@@ -28,8 +28,7 @@
   <h1>8086 Assembly Runner</h1>
   <p class="small">
     Paste TASM-style source (<code>.model small</code> etc.), optionally upload files (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>), then click <b>Run</b>.
-    The emulator stays alive between runs; your program’s generated files remain available until you click <b>Reset VM</b>.
-    Your source text is saved locally on each run.
+    The emulator stays alive between runs; your program’s generated files remain until you click <b>Reset VM</b>. Your source text is saved locally.
   </p>
 
   <div class="grid">
@@ -51,21 +50,16 @@
     <div>
       <div id="dosbox"></div>
       <p class="small">
-        Tip: refer to uploaded files by their DOS 8.3 names (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>).  
-        <b>Keyboard & mouse</b> work inside the DOS frame—click inside to focus.
+        Tip: refer to uploaded files by their DOS 8.3 names (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>).
+        Keyboard & mouse work inside the DOS frame—click inside to focus.
       </p>
     </div>
   </div>
 
   <script>
-  // One-time guard (in case this file is included twice by a site template)
   if (!window.__asmRunnerInit__) {
     window.__asmRunnerInit__ = true;
 
-    // js-dos core
-    const WDO_URL = "https://v8.js-dos.com/latest/wdosbox.js";
-
-    // Elements
     const elCode   = document.getElementById('code');
     const elRun    = document.getElementById('runBtn');
     const elReset  = document.getElementById('resetBtn');
@@ -77,7 +71,6 @@
     const LS_KEY = "asm-editor-text-v1";
     const encoder = new TextEncoder();
 
-    // Default starter code
     const DEFAULT_SRC = [
       "; Sample TASM program (EXE) for 8086",
       ".model small",
@@ -96,15 +89,10 @@
       "main endp",
       "end main"
     ].join("\n");
-
-    // Load persisted text (or default)
     elCode.value = localStorage.getItem(LS_KEY) || DEFAULT_SRC;
 
-    // Maintain uploaded files in-memory for this tab session
-    // { original: "...", dosName: "FOO.BMP", bytes: Uint8Array }
+    // Uploads kept in-memory: { original, dosName, bytes }
     let uploads = [];
-
-    // DOS 8.3 name conversion
     function toDos83(name) {
       const idx = name.lastIndexOf(".");
       let base = (idx >= 0 ? name.slice(0, idx) : name).toUpperCase();
@@ -114,37 +102,31 @@
       ext  = clean(ext).slice(0, 3);
       return ext ? `${base}.${ext}` : base;
     }
-
-    // Handle uploads → memory
     elInput.addEventListener('change', async (e) => {
       const files = Array.from(e.target.files || []);
       if (!files.length) return;
-
-      const readAll = files.map(f => new Promise((resolve, reject) => {
-        const fr = new FileReader();
-        fr.onload = () => resolve({ file: f, bytes: new Uint8Array(fr.result) });
-        fr.onerror = () => reject(fr.error || new Error("Failed to read " + f.name));
-        fr.readAsArrayBuffer(f);
+      const reads = files.map(f => new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res({ file: f, bytes: new Uint8Array(r.result) });
+        r.onerror = () => rej(r.error || new Error("Read failed: " + f.name));
+        r.readAsArrayBuffer(f);
       }));
-
       try {
-        const read = await Promise.all(readAll);
-        for (const { file, bytes } of read) {
+        const got = await Promise.all(reads);
+        for (const { file, bytes } of got) {
           let dos = toDos83(file.name);
-          // avoid DOS name collisions within this session
           let candidate = dos, i = 1;
           while (uploads.some(u => u.dosName === candidate)) {
             const dot = dos.lastIndexOf(".");
             const b = dot >= 0 ? dos.slice(0, dot) : dos;
-            const e = dot >= 0 ? dos.slice(dot) : "";
+            const e2 = dot >= 0 ? dos.slice(dot) : "";
             const suffix = String(i++).slice(-1);
-            candidate = (b.slice(0, Math.max(0, 8 - 1)) + suffix) + e;
+            candidate = (b.slice(0, Math.max(0, 8 - 1)) + suffix) + e2;
           }
-          const existing = uploads.findIndex(u => u.original === file.name);
-          if (existing >= 0) uploads[existing] = { original: file.name, dosName: candidate, bytes };
+          const idxExisting = uploads.findIndex(u => u.original === file.name);
+          if (idxExisting >= 0) uploads[idxExisting] = { original: file.name, dosName: candidate, bytes };
           else uploads.push({ original: file.name, dosName: candidate, bytes });
         }
-        // Update UI list
         elList.innerHTML = "";
         for (const u of uploads) {
           const li = document.createElement("li");
@@ -158,73 +140,68 @@
       }
     });
 
-    // Toolchain buffers
+    // Toolchain (fetched once)
     let tasmBuf = null, tlinkBuf = null, dpmiBuf = null, rtmBuf = null;
-
     async function preloadTools() {
-      const fetchBinary = async (path, { optional = false } = {}) => {
-        const resp = await fetch(path);
-        if (!resp.ok) {
-          if (optional) return null;
-          throw new Error(path + " not found");
-        }
-        const ab = await resp.arrayBuffer();
-        return new Uint8Array(ab);
+      const get = async (path, opt = false) => {
+        const r = await fetch(path);
+        if (!r.ok) { if (opt) return null; throw new Error(path + " not found"); }
+        return new Uint8Array(await r.arrayBuffer());
       };
       [tasmBuf, tlinkBuf, dpmiBuf, rtmBuf] = await Promise.all([
-        fetchBinary("tools/TASM.EXE"),
-        fetchBinary("tools/TLINK.EXE"),
-        fetchBinary("tools/DPMI16BI.OVL", { optional: true }),
-        fetchBinary("tools/RTM.EXE",       { optional: true })
+        get("tools/TASM.EXE"),
+        get("tools/TLINK.EXE"),
+        get("tools/DPMI16BI.OVL", true),
+        get("tools/RTM.EXE", true)
       ]);
     }
 
-    // Provide a tiny DOSBox config so the player starts straight into DOS (no picker)
+    // Basic config: start straight in DOS, mounted C:
     const BASIC_CONF = `
 [sdl]
 fullscreen=false
 
 [autoexec]
 @echo off
-echo Live DOS VM starting...
+mount c .
+c:
+echo Live DOS VM ready
 `;
 
-    // Live VM handles
-    let fsHandle = null;   // filesystem API from js-dos
-    let mainExec = null;   // function to run DOS commands
+    // v8 Player API: keep a single CI instance alive
+    let props = null;      // DosProps (player controls)
+    let ci    = null;      // CommandInterface
 
-    // Create or recreate the VM (now with a config to suppress the launcher)
-    async function createVm() {
+    function bootVm() {
       return new Promise((resolve) => {
-        elDos.innerHTML = ""; // clear previous canvas if any
-        Dos(elDos, {
-          wdosboxUrl: WDO_URL,
-          dosboxConf: BASIC_CONF
-        }).ready(async (fs, main) => {
-          fsHandle = fs;
-          mainExec = main;
-          // Mount current working dir as C: and switch to it
-          await mainExec(["-c", "MOUNT C .", "-c", "C:"]);
-          // Friendly banner
-          await mainExec(["-c", "ECHO Live DOS VM ready"]);
-          resolve();
+        props = Dos(elDos, {
+          dosboxConf: BASIC_CONF,
+          onEvent: (event, payload) => {
+            if (event === "ci-ready") {
+              ci = payload;
+              resolve();
+            }
+          }
         });
       });
     }
 
-    // Ensure VM exists
-    async function ensureVm() {
-      if (!fsHandle || !mainExec) {
-        await createVm();
+    // Helper: write (or overwrite) a file inside DOS FS
+    async function fsWrite(path, bytes) {
+      await ci.fsWriteFile(path, bytes);
+      // Note: v8 docs mention that sometimes you need to remount to see changes,
+      // but fsWriteFile writes directly to the emulated FS so it's typically visible immediately.
+    }
+
+    // Helper: type a command into the DOS prompt (and press Enter)
+    async function typeCommand(cmd) {
+      // simulateKeyPress expects an array of keyCodes (ASCII works well for standard chars)
+      for (const ch of (cmd + "\r")) {
+        ci.simulateKeyPress(ch.charCodeAt(0));
       }
     }
 
-    // Write/overwrite a file into C:\
-    async function writeFileDos(path, bytes) {
-      await fsHandle.createFile(path, bytes);
-    }
-
-    // Build script
+    // BUILD.BAT contents
     function buildBatBytes() {
       const lines = [
         "@echo off",
@@ -245,53 +222,45 @@ echo Live DOS VM starting...
         "echo.",
         "echo ===== DONE ====="
       ].join("\r\n");
-      return new TextEncoder().encode(lines);
+      return encoder.encode(lines);
     }
 
-    // Write toolchain (once) if missing, else skip
+    async function ensureVm() {
+      if (!ci) await bootVm();
+    }
+
     async function ensureToolchain() {
-      if (!tasmBuf || !tlinkBuf) {
-        await preloadTools();
-      }
-      // Always (re)write to be safe (tiny files, keeps it simple)
-      await writeFileDos("TASM.EXE",  tasmBuf);
-      await writeFileDos("TLINK.EXE", tlinkBuf);
-      if (dpmiBuf) await writeFileDos("DPMI16BI.OVL", dpmiBuf);
-      if (rtmBuf)  await writeFileDos("RTM.EXE",      rtmBuf);
+      if (!tasmBuf || !tlinkBuf) await preloadTools();
+      await fsWrite("TASM.EXE",  tasmBuf);
+      await fsWrite("TLINK.EXE", tlinkBuf);
+      if (dpmiBuf) await fsWrite("DPMI16BI.OVL", dpmiBuf);
+      if (rtmBuf)  await fsWrite("RTM.EXE",      rtmBuf);
     }
 
-    // Run build inside the SAME VM
-    async function runBuildInVm(sourceText) {
-      // Persist editor text locally
+    async function runBuild(sourceText) {
       localStorage.setItem(LS_KEY, sourceText);
-
-      // Ensure VM & tools in place
       await ensureVm();
       await ensureToolchain();
 
-      // Write/update source and batch
-      await writeFileDos("MAIN.ASM", new TextEncoder().encode(sourceText));
-      await writeFileDos("BUILD.BAT", buildBatBytes());
+      await fsWrite("MAIN.ASM",  encoder.encode(sourceText));
+      await fsWrite("BUILD.BAT", buildBatBytes());
 
-      // Inject/overwrite uploaded files
       for (const u of uploads) {
-        await writeFileDos(u.dosName, u.bytes);
+        await fsWrite(u.dosName, u.bytes);
       }
 
-      // Execute BUILD.BAT from C:\
-      await mainExec(["-c", "CALL BUILD"]);
+      // call BUILD in the *existing* VM
+      await typeCommand("CALL BUILD");
     }
 
-    // RUN button: write files → run build in live VM
+    // Run
     elRun.addEventListener('click', async () => {
       try {
         elRun.disabled = true;
         elReset.disabled = true;
         elStat.textContent = "Running...";
-
         const code = elCode.value || "";
-        await runBuildInVm(code);
-
+        await runBuild(code);
         elStat.textContent = "Done. (VM is still running — edit and Run again)";
       } catch (e) {
         console.error(e);
@@ -302,15 +271,15 @@ echo Live DOS VM starting...
       }
     });
 
-    // RESET VM: recreate a fresh emulator (does NOT clear editor text or uploads)
+    // Reset VM (fresh DOS, keeps editor text & staged uploads)
     elReset.addEventListener('click', async () => {
       try {
         elRun.disabled = true;
         elReset.disabled = true;
         elStat.textContent = "Resetting VM...";
-        fsHandle = null;
-        mainExec = null;
-        await createVm();
+        if (props) await props.stop(); // fully dispose current player
+        props = null; ci = null;
+        await bootVm();
         elStat.textContent = "Fresh VM ready.";
       } catch (e) {
         console.error(e);
@@ -321,10 +290,10 @@ echo Live DOS VM starting...
       }
     });
 
-    // Auto-create VM on first load so students see the console straight away
+    // Boot once on load
     (async () => {
       elStat.textContent = "Starting VM...";
-      await createVm();
+      await bootVm();
       elStat.textContent = "VM ready.";
     })();
   }
