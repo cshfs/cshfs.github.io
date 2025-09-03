@@ -179,16 +179,27 @@
       ]);
     }
 
+    // Provide a tiny DOSBox config so the player starts straight into DOS (no picker)
+    const BASIC_CONF = `
+[sdl]
+fullscreen=false
+
+[autoexec]
+@echo off
+echo Live DOS VM starting...
+`;
+
     // Live VM handles
     let fsHandle = null;   // filesystem API from js-dos
     let mainExec = null;   // function to run DOS commands
 
-    // Create or recreate the VM (only used on first start and when clicking Reset)
+    // Create or recreate the VM (now with a config to suppress the launcher)
     async function createVm() {
       return new Promise((resolve) => {
         elDos.innerHTML = ""; // clear previous canvas if any
         Dos(elDos, {
-          wdosboxUrl: WDO_URL
+          wdosboxUrl: WDO_URL,
+          dosboxConf: BASIC_CONF
         }).ready(async (fs, main) => {
           fsHandle = fs;
           mainExec = main;
@@ -210,7 +221,6 @@
 
     // Write/overwrite a file into C:\
     async function writeFileDos(path, bytes) {
-      // js-dos FS helper API supports creating files; keep it simple:
       await fsHandle.createFile(path, bytes);
     }
 
@@ -235,7 +245,7 @@
         "echo.",
         "echo ===== DONE ====="
       ].join("\r\n");
-      return encoder.encode(lines);
+      return new TextEncoder().encode(lines);
     }
 
     // Write toolchain (once) if missing, else skip
@@ -260,7 +270,7 @@
       await ensureToolchain();
 
       // Write/update source and batch
-      await writeFileDos("MAIN.ASM", encoder.encode(sourceText));
+      await writeFileDos("MAIN.ASM", new TextEncoder().encode(sourceText));
       await writeFileDos("BUILD.BAT", buildBatBytes());
 
       // Inject/overwrite uploaded files
