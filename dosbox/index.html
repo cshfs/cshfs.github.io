@@ -156,7 +156,7 @@
       ]);
     }
 
-    // Basic config: start straight in DOS, mounted C:
+    // Start straight in DOS with C: mounted
     const BASIC_CONF = `
 [sdl]
 fullscreen=false
@@ -168,9 +168,9 @@ c:
 echo Live DOS VM ready
 `;
 
-    // v8 Player API: keep a single CI instance alive
-    let props = null;      // DosProps (player controls)
-    let ci    = null;      // CommandInterface
+    // v8 Player API
+    let props = null; // player
+    let ci    = null; // command interface
 
     function bootVm() {
       return new Promise((resolve) => {
@@ -186,22 +186,35 @@ echo Live DOS VM ready
       });
     }
 
-    // Helper: write (or overwrite) a file inside DOS FS
-    async function fsWrite(path, bytes) {
-      await ci.fsWriteFile(path, bytes);
-      // Note: v8 docs mention that sometimes you need to remount to see changes,
-      // but fsWriteFile writes directly to the emulated FS so it's typically visible immediately.
+    // Helpers
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    async function focusDosCanvas() {
+      // Try to focus the canvas so the emulator accepts input
+      const canvas = elDos.querySelector("canvas");
+      if (canvas && canvas.focus) canvas.focus();
+      // Some browsers need a tiny delay after focus
+      await sleep(50);
     }
 
-    // Helper: type a command into the DOS prompt (and press Enter)
+    async function fsWrite(path, bytes) {
+      await ci.fsWriteFile(path, bytes);
+    }
+
     async function typeCommand(cmd) {
-      // simulateKeyPress expects an array of keyCodes (ASCII works well for standard chars)
+      // Ensure DOS has focus and give it a moment
+      await focusDosCanvas();
+      // Clear any partial input first (press Enter)
+      ci.simulateKeyPress(13);
+      await sleep(30);
+      // Send the whole command (uppercase/lowercase both fine)
       for (const ch of (cmd + "\r")) {
         ci.simulateKeyPress(ch.charCodeAt(0));
+        // Tiny throttle helps reliability on some browsers
+        await sleep(2);
       }
     }
 
-    // BUILD.BAT contents
     function buildBatBytes() {
       const lines = [
         "@echo off",
@@ -244,23 +257,17 @@ echo Live DOS VM ready
 
       await fsWrite("MAIN.ASM",  encoder.encode(sourceText));
       await fsWrite("BUILD.BAT", buildBatBytes());
+      for (const u of uploads) await fsWrite(u.dosName, u.bytes);
 
-      for (const u of uploads) {
-        await fsWrite(u.dosName, u.bytes);
-      }
-
-      // call BUILD in the *existing* VM
       await typeCommand("CALL BUILD");
     }
 
-    // Run
     elRun.addEventListener('click', async () => {
       try {
         elRun.disabled = true;
         elReset.disabled = true;
         elStat.textContent = "Running...";
-        const code = elCode.value || "";
-        await runBuild(code);
+        await runBuild(elCode.value || "");
         elStat.textContent = "Done. (VM is still running — edit and Run again)";
       } catch (e) {
         console.error(e);
@@ -271,13 +278,12 @@ echo Live DOS VM ready
       }
     });
 
-    // Reset VM (fresh DOS, keeps editor text & staged uploads)
     elReset.addEventListener('click', async () => {
       try {
         elRun.disabled = true;
         elReset.disabled = true;
         elStat.textContent = "Resetting VM...";
-        if (props) await props.stop(); // fully dispose current player
+        if (props) await props.stop();
         props = null; ci = null;
         await bootVm();
         elStat.textContent = "Fresh VM ready.";
@@ -290,7 +296,6 @@ echo Live DOS VM ready
       }
     });
 
-    // Boot once on load
     (async () => {
       elStat.textContent = "Starting VM...";
       await bootVm();
