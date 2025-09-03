@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>8086 Assembly Runner (TASM/TLINK, js-dos CDN)</title>
 
-  <!-- js-dos from CDN -->
-<link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
-<script src="https://v8.js-dos.com/latest/js-dos.js"></script>
+  <!-- js-dos v8 CDN -->
+  <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
+  <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
 
   <style>
     body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
@@ -41,11 +41,15 @@
 
     <div>
       <div id="dosbox"></div>
-      <p class="small">Tip: scroll the output box for full logs; DOS screen is just for the program run.</p>
+      <p class="small">Tip: scroll the output box for full logs; the DOS screen is just for the program run.</p>
     </div>
   </div>
 
   <script>
+  // Prevent duplicate initialization if this script is included twice by the site template
+  if (!window.__asmRunnerInit__) {
+    window.__asmRunnerInit__ = true;
+
     // Use js-dos CDN core
     const WDO_URL = "https://v8.js-dos.com/latest/wdosbox.js";
 
@@ -76,7 +80,7 @@
       "    int 21h",
       "main endp",
       "end main"
-    ].join("\\n");
+    ].join("\n");
 
     elCode.value = localStorage.getItem(LS_KEY) || DEFAULT_SRC;
 
@@ -84,8 +88,14 @@
     let tasmBuf = null, tlinkBuf = null;
     async function preloadTools() {
       const [tasm, tlink] = await Promise.all([
-        fetch("tools/TASM.EXE").then(r => r.arrayBuffer()),
-        fetch("tools/TLINK.EXE").then(r => r.arrayBuffer())
+        fetch("tools/TASM.EXE").then(r => {
+          if (!r.ok) throw new Error("TASM.EXE not found");
+          return r.arrayBuffer();
+        }),
+        fetch("tools/TLINK.EXE").then(r => {
+          if (!r.ok) throw new Error("TLINK.EXE not found");
+          return r.arrayBuffer();
+        })
       ]);
       tasmBuf  = new Uint8Array(tasm);
       tlinkBuf = new Uint8Array(tlink);
@@ -93,7 +103,7 @@
 
     // Print to output pane
     function print(line = "") {
-      elOut.textContent += (line.endsWith("\\n") ? line : line + "\\n");
+      elOut.textContent += (line.endsWith("\n") ? line : line + "\n");
       elOut.scrollTop = elOut.scrollHeight;
     }
 
@@ -112,8 +122,10 @@ echo js-dos (TASM/TLINK) ready
 BUILD
 `;
 
+    // Command interface holder: avoid redeclaration by using window
+    window._dosCi = window._dosCi || null;
+
     // Launch a fresh js-dos instance and hook stdout
-    let ci = null; // command interface
     function startDosWith(initFs) {
       elDos.innerHTML = ""; // clean container
       return new Promise((resolve) => {
@@ -123,8 +135,10 @@ BUILD
           initFs,
           onEvent: (event, payload) => {
             if (event === "ci-ready") {
-              ci = payload;
-              ci.events().onStdout((msg) => print(msg));
+              window._dosCi = payload;
+              if (window._dosCi && window._dosCi.events) {
+                window._dosCi.events().onStdout((msg) => print(msg));
+              }
               resolve();
             }
           }
@@ -155,7 +169,7 @@ BUILD
         ":END",
         "echo.",
         "echo ===== DONE ====="
-      ].join("\\r\\n"));
+      ].join("\r\n"));
     }
 
     // Run button handler
@@ -194,6 +208,7 @@ BUILD
 
     // Optional: auto-run once on load
     // window.addEventListener('load', () => elRun.click());
+  }
   </script>
 </body>
 </html>
