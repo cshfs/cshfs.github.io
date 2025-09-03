@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>8086 Assembly Runner (TASM/TLINK, js-dos CDN)</title>
+  <title>8086 Assembly Runner (TASM/TLINK, js-dos CDN, file uploads)</title>
 
   <!-- js-dos v8 CDN -->
   <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
@@ -11,54 +11,69 @@
 
   <style>
     body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
-    .row { display: grid; grid-template-columns: 1fr 820px; gap: 16px; align-items: start; }
+    .grid { display: grid; grid-template-columns: 1fr 820px; gap: 16px; align-items: start; }
     textarea { width: 100%; height: 560px; font-family: Consolas, Menlo, monospace; font-size: 14px; }
     #dosbox { width: 800px; height: 600px; border: 1px solid #ccc; }
     #runBtn { padding: 8px 14px; font-size: 16px; }
-    .bar { display:flex; gap:8px; align-items:center; margin:8px 0 0; }
+    .bar { display:flex; gap:12px; align-items:center; margin:8px 0 0; flex-wrap: wrap; }
     .small { color:#666; font-size: 12px; }
+    .uploads { margin-top: 8px; }
+    .uploads ul { margin: 6px 0 0; padding-left: 18px; }
+    .uploads li { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     h1 { margin-top: 0; }
+    .chip { display:inline-block; padding:2px 6px; border:1px solid #ccc; border-radius: 6px; background:#fafafa; }
   </style>
 </head>
 <body>
   <h1>8086 Assembly Runner</h1>
   <p class="small">
-    Paste TASM-style source (<code>.model small</code> etc.), click <b>Run</b>. All build messages and program I/O appear in the DOS screen.
-    Your code is saved locally (browser) every time you press Run.
+    Paste TASM-style source (<code>.model small</code> etc.), optionally upload files (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>), then click <b>Run</b>.
+    All build messages and program I/O appear in the DOS screen. Your code is saved locally each time you press Run.
   </p>
 
-  <div class="row">
+  <div class="grid">
     <div>
       <textarea id="code"></textarea>
       <div class="bar">
+        <input type="file" id="fileInput" multiple />
         <button id="runBtn">Run</button>
         <span id="status" class="small"></span>
+      </div>
+
+      <div class="uploads">
+        <span class="small">Files to inject into <span class="chip">C:\</span> (original → DOS 8.3):</span>
+        <ul id="fileList"></ul>
       </div>
     </div>
 
     <div>
       <div id="dosbox"></div>
-      <p class="small">Tip: the DOS screen shows both TASM/TLINK diagnostics and your program output.</p>
+      <p class="small">
+        Tip: refer to uploaded files by their DOS 8.3 names (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>).
+      </p>
     </div>
   </div>
 
   <script>
-  // Prevent duplicate initialization if this script is included twice by the site template
+  // Prevent duplicate initialization if included via a layout twice
   if (!window.__asmRunnerInit__) {
     window.__asmRunnerInit__ = true;
 
-    // Use js-dos CDN core
+    // js-dos core
     const WDO_URL = "https://v8.js-dos.com/latest/wdosbox.js";
 
-    const elCode  = document.getElementById('code');
-    const elRun   = document.getElementById('runBtn');
-    const elStat  = document.getElementById('status');
-    const elDos   = document.getElementById('dosbox');
+    // Elements
+    const elCode   = document.getElementById('code');
+    const elRun    = document.getElementById('runBtn');
+    const elStat   = document.getElementById('status');
+    const elDos    = document.getElementById('dosbox');
+    const elInput  = document.getElementById('fileInput');
+    const elList   = document.getElementById('fileList');
 
     const LS_KEY = "asm-editor-text-v1";
     const encoder = new TextEncoder();
 
-    // Starter code (students can overwrite)
+    // Load persisted text (or default)
     const DEFAULT_SRC = [
       "; Sample TASM program (EXE) for 8086",
       ".model small",
@@ -77,12 +92,81 @@
       "main endp",
       "end main"
     ].join("\n");
+    elCode.value = localStorage.getItem(LS_KEY) || DEFAULT_SRC;
 
-    // Load persisted text (or default)
-    const saved = localStorage.getItem(LS_KEY);
-    document.getElementById('code').value = saved || DEFAULT_SRC;
+    // Uploaded files (kept in-memory for this session)
+    // Each entry: { original: "My Picture.bmp", dosName: "MYPICTUR.BMP", bytes: Uint8Array }
+    let uploads = [];
 
-    // Preload tools from your repo (TASM, TLINK, and optional overlays/helpers)
+    // Convert a filename to DOS 8.3 (upper-case, trimmed chars)
+    function toDos83(name) {
+      // Split on last dot
+      const idx = name.lastIndexOf(".");
+      let base = (idx >= 0 ? name.slice(0, idx) : name).toUpperCase();
+      let ext  = (idx >= 0 ? name.slice(idx + 1) : "").toUpperCase();
+
+      // Keep alnum and underscore, replace others with underscore
+      const clean = s => s.replace(/[^A-Z0-9]/g, "_");
+      base = clean(base).slice(0, 8);
+      ext  = clean(ext).slice(0, 3);
+
+      return ext ? `${base}.${ext}` : base;
+    }
+
+    // Read files from input into uploads[]
+    elInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
+
+      // Read as ArrayBuffer
+      const readAll = files.map(f => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ file: f, bytes: new Uint8Array(reader.result) });
+        reader.onerror = () => reject(reader.error || new Error("Failed to read " + f.name));
+        reader.readAsArrayBuffer(f);
+      }));
+
+      try {
+        const read = await Promise.all(readAll);
+
+        // Merge/replace by original name; compute DOS names (avoid collisions)
+        for (const { file, bytes } of read) {
+          let dos = toDos83(file.name);
+          // Ensure DOS name uniqueness within this session
+          let candidate = dos, i = 1;
+          while (uploads.some(u => u.dosName === candidate)) {
+            const idx = dos.lastIndexOf(".");
+            const b = idx >= 0 ? dos.slice(0, idx) : dos;
+            const e = idx >= 0 ? dos.slice(idx) : "";
+            const suffix = String(i++).slice(-1); // single-digit suffix
+            candidate = (b.slice(0, Math.max(0, 8 - 1)) + suffix) + e; // keep 8.3
+          }
+          dos = candidate;
+
+          // Replace if same original name already exists, else push
+          const existing = uploads.findIndex(u => u.original === file.name);
+          if (existing >= 0) {
+            uploads[existing] = { original: file.name, dosName: dos, bytes };
+          } else {
+            uploads.push({ original: file.name, dosName: dos, bytes });
+          }
+        }
+
+        // Update list UI
+        elList.innerHTML = "";
+        for (const u of uploads) {
+          const li = document.createElement("li");
+          li.textContent = `${u.original}  →  ${u.dosName}`;
+          elList.appendChild(li);
+        }
+        elStat.textContent = `${uploads.length} file(s) ready`;
+      } catch (err) {
+        console.error(err);
+        elStat.textContent = "Error reading files";
+      }
+    });
+
+    // Preload toolchain from your repo (TASM, TLINK, optional DPMI/RTM)
     let tasmBuf = null, tlinkBuf = null, dpmiBuf = null, rtmBuf = null;
 
     async function preloadTools() {
@@ -99,12 +183,12 @@
       [tasmBuf, tlinkBuf, dpmiBuf, rtmBuf] = await Promise.all([
         fetchBinary("tools/TASM.EXE"),
         fetchBinary("tools/TLINK.EXE"),
-        fetchBinary("tools/DPMI16BI.OVL", { optional: true }), // Borland DPMI overlay (optional)
-        fetchBinary("tools/RTM.EXE",       { optional: true })  // Borland DPMI server (optional)
+        fetchBinary("tools/DPMI16BI.OVL", { optional: true }),
+        fetchBinary("tools/RTM.EXE",       { optional: true })
       ]);
     }
 
-    // DOSBox config: mount and drive switch must be in [autoexec]
+    // DOSBox config (mount + run BUILD.BAT)
     const DOS_CONF = `
 [sdl]
 fullscreen=false
@@ -117,15 +201,15 @@ echo js-dos (TASM/TLINK) ready
 BUILD
 `;
 
-    // Command interface holder (kept on window to avoid redeclaration)
+    // Command interface holder
     window._dosCi = window._dosCi || null;
 
-    // Launch js-dos with initial files
+    // Launch DOS with initial files
     function startDosWith(initFs) {
       elDos.innerHTML = ""; // reset container
       return new Promise((resolve) => {
         Dos(elDos, {
-          wdosboxUrl: WDO_URL,
+          wdosboxUrl: "https://v8.js-dos.com/latest/wdosbox.js",
           dosboxConf: DOS_CONF,
           initFs,
           onEvent: (event, payload) => {
@@ -138,10 +222,7 @@ BUILD
       });
     }
 
-    // BUILD.BAT for TASM/TLINK:
-    // - Assemble MAIN.ASM
-    // - On error, show BUILD.LOG
-    // - On success, link then run MAIN.EXE
+    // BUILD.BAT for TASM/TLINK
     function buildBat() {
       return encoder.encode([
         "@echo off",
@@ -164,7 +245,7 @@ BUILD
       ].join("\r\n"));
     }
 
-    // Run button handler
+    // Run button
     elRun.addEventListener('click', async () => {
       try {
         elRun.disabled = true;
@@ -178,7 +259,7 @@ BUILD
         const code = elCode.value || "";
         localStorage.setItem(LS_KEY, code);
 
-        // Files to inject into C:\
+        // Base files injected into C:\
         const initFs = [
           { path: "TASM.EXE",  contents: tasmBuf },
           { path: "TLINK.EXE", contents: tlinkBuf },
@@ -186,11 +267,14 @@ BUILD
           { path: "BUILD.BAT", contents: buildBat() }
         ];
 
-        // If you provided the DPMI overlay, add it right next to TLINK.EXE
+        // Optional Borland extras
         if (dpmiBuf) initFs.push({ path: "DPMI16BI.OVL", contents: dpmiBuf });
+        if (rtmBuf)  initFs.push({ path: "RTM.EXE",      contents: rtmBuf  });
 
-        // If you provided RTM.EXE, add it too (some Borland tools expect it)
-        if (rtmBuf)  initFs.push({ path: "RTM.EXE", contents: rtmBuf });
+        // Inject uploaded files at their DOS 8.3 names
+        for (const u of uploads) {
+          initFs.push({ path: u.dosName, contents: u.bytes });
+        }
 
         await startDosWith(initFs);
         elStat.textContent = "Running in DOS...";
@@ -201,9 +285,6 @@ BUILD
         elRun.disabled = false;
       }
     });
-
-    // Optional: auto-run once on load
-    // window.addEventListener('load', () => elRun.click());
   }
   </script>
 </body>
