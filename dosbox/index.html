@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>8086 Assembly Runner (TASM/TLINK, js-dos CDN)</title>
+
+  <!-- js-dos from CDN -->
+  <script src="https://js-dos.com/cdn/js-dos.js"></script>
+  <link rel="stylesheet" href="https://js-dos.com/cdn/js-dos.css" />
+
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
+    .row { display: grid; grid-template-columns: 1fr 520px; gap: 16px; align-items: start; }
+    textarea { width: 100%; height: 520px; font-family: Consolas, Menlo, monospace; font-size: 14px; }
+    #dosbox { width: 520px; height: 400px; border: 1px solid #ccc; }
+    #runBtn { padding: 8px 14px; font-size: 16px; }
+    #out { background:#101010; color:#d7d7d7; padding:10px; height: 240px; overflow:auto; white-space: pre-wrap; }
+    .bar { display:flex; gap:8px; align-items:center; margin:8px 0 0; }
+    .small { color:#666; font-size: 12px; }
+    h1 { margin-top: 0; }
+  </style>
+</head>
+<body>
+  <h1>8086 Assembly Runner</h1>
+  <p class="small">
+    Paste TASM-style source (<code>.model small</code> etc.), click <b>Run</b>. Build output appears below; on success the EXE runs in DOS.
+    Your code is saved locally (browser) every time you press Run.
+  </p>
+
+  <div class="row">
+    <div>
+      <textarea id="code"></textarea>
+      <div class="bar">
+        <button id="runBtn">Run</button>
+        <span id="status" class="small"></span>
+      </div>
+      <h3>Build & Program Output</h3>
+      <div id="out"></div>
+    </div>
+
+    <div>
+      <div id="dosbox"></div>
+      <p class="small">Tip: scroll the output box for full logs; DOS screen is just for the program run.</p>
+    </div>
+  </div>
+
+  <script>
+    // Use js-dos CDN core
+    const WDO_URL = "https://js-dos.com/cdn/wdosbox.js";
+
+    const elCode  = document.getElementById('code');
+    const elRun   = document.getElementById('runBtn');
+    const elOut   = document.getElementById('out');
+    const elStat  = document.getElementById('status');
+    const elDos   = document.getElementById('dosbox');
+
+    const LS_KEY = "asm-editor-text-v1";
+    const encoder = new TextEncoder();
+
+    // Starter code (students can overwrite)
+    const DEFAULT_SRC = [
+      "; Sample TASM program (EXE) for 8086",
+      ".model small",
+      ".stack 100h",
+      ".data",
+      "msg db 'Hello from TASM in the browser!$'",
+      ".code",
+      "main proc",
+      "    mov ax, @data",
+      "    mov ds, ax",
+      "    mov dx, offset msg",
+      "    mov ah, 9",
+      "    int 21h",
+      "    mov ax, 4C00h",
+      "    int 21h",
+      "main endp",
+      "end main"
+    ].join("\\n");
+
+    elCode.value = localStorage.getItem(LS_KEY) || DEFAULT_SRC;
+
+    // Preload TASM/TLINK from your repo (tools/)
+    let tasmBuf = null, tlinkBuf = null;
+    async function preloadTools() {
+      const [tasm, tlink] = await Promise.all([
+        fetch("tools/TASM.EXE").then(r => r.arrayBuffer()),
+        fetch("tools/TLINK.EXE").then(r => r.arrayBuffer())
+      ]);
+      tasmBuf  = new Uint8Array(tasm);
+      tlinkBuf = new Uint8Array(tlink);
+    }
+
+    // Print to output pane
+    function print(line = "") {
+      elOut.textContent += (line.endsWith("\\n") ? line : line + "\\n");
+      elOut.scrollTop = elOut.scrollHeight;
+    }
+
+    // DOSBox config: mount C: to working dir and auto-run BUILD.BAT
+    const DOS_CONF = `
+[sdl]
+fullscreen=false
+
+[dos]
+mount c .
+c:
+
+[autoexec]
+@echo off
+echo js-dos (TASM/TLINK) ready
+BUILD
+`;
+
+    // Launch a fresh js-dos instance and hook stdout
+    let ci = null; // command interface
+    function startDosWith(initFs) {
+      elDos.innerHTML = ""; // clean container
+      return new Promise((resolve) => {
+        Dos(elDos, {
+          wdosboxUrl: WDO_URL,
+          dosboxConf: DOS_CONF,
+          initFs,
+          onEvent: (event, payload) => {
+            if (event === "ci-ready") {
+              ci = payload;
+              ci.events().onStdout((msg) => print(msg));
+              resolve();
+            }
+          }
+        });
+      });
+    }
+
+    // BUILD.BAT for TASM/TLINK:
+    // - Assemble MAIN.ASM quietly to reduce prompts
+    // - On error, print BUILD.LOG and stop
+    // - On success, link then run MAIN.EXE
+    function buildBat() {
+      return encoder.encode([
+        "@echo off",
+        "echo Assembling MAIN.ASM (TASM)...",
+        "TASM /q MAIN.ASM > BUILD.LOG",
+        "if errorlevel 1 goto ERR",
+        "echo Linking MAIN.OBJ (TLINK)...",
+        "TLINK MAIN.OBJ,,NUL,; >> BUILD.LOG",
+        "if errorlevel 1 goto ERR",
+        "echo Running MAIN.EXE...",
+        "MAIN.EXE",
+        "goto END",
+        ":ERR",
+        "echo.",
+        "echo ===== BUILD FAILED =====",
+        "type BUILD.LOG",
+        ":END",
+        "echo.",
+        "echo ===== DONE ====="
+      ].join("\\r\\n"));
+    }
+
+    // Run button handler
+    elRun.addEventListener('click', async () => {
+      try {
+        elRun.disabled = true;
+        elOut.textContent = "";
+        elStat.textContent = "Preparing...";
+
+        if (!tasmBuf || !tlinkBuf) {
+          await preloadTools();
+        }
+
+        // Save editor text for persistence
+        const code = elCode.value || "";
+        localStorage.setItem(LS_KEY, code);
+
+        // Files to inject into C:\
+        const initFs = [
+          { path: "TASM.EXE",  contents: tasmBuf },
+          { path: "TLINK.EXE", contents: tlinkBuf },
+          { path: "MAIN.ASM",  contents: encoder.encode(code) },
+          { path: "BUILD.BAT", contents: buildBat() }
+        ];
+
+        await startDosWith(initFs);
+        elStat.textContent = "Running in DOS... (see output)";
+      } catch (e) {
+        console.error(e);
+        print("Error: " + (e?.message || e));
+        elStat.textContent = "Error";
+      } finally {
+        elRun.disabled = false;
+      }
+    });
+
+    // Optional: auto-run once on load
+    // window.addEventListener('load', () => elRun.click());
+  </script>
+</body>
+</html>
