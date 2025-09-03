@@ -78,27 +78,32 @@
       "end main"
     ].join("\n");
 
-    elCode.value = localStorage.getItem(LS_KEY) || DEFAULT_SRC;
+    // Load persisted text (or default)
+    const saved = localStorage.getItem(LS_KEY);
+    document.getElementById('code').value = saved || DEFAULT_SRC;
 
-    // Preload TASM/TLINK from your repo (tools/)
-    let tasmBuf = null, tlinkBuf = null;
+    // Preload tools from your repo (TASM, TLINK, and optionally DPMI overlay)
+    let tasmBuf = null, tlinkBuf = null, dpmiBuf = null;
+
     async function preloadTools() {
-      const [tasm, tlink] = await Promise.all([
-        fetch("tools/TASM.EXE").then(r => {
-          if (!r.ok) throw new Error("TASM.EXE not found");
-          return r.arrayBuffer();
-        }),
-        fetch("tools/TLINK.EXE").then(r => {
-          if (!r.ok) throw new Error("TLINK.EXE not found");
-          return r.arrayBuffer();
-        })
+      const fetchBinary = async (path, { optional = false } = {}) => {
+        const resp = await fetch(path);
+        if (!resp.ok) {
+          if (optional) return null;
+          throw new Error(path + " not found");
+        }
+        const ab = await resp.arrayBuffer();
+        return new Uint8Array(ab);
+      };
+
+      [tasmBuf, tlinkBuf, dpmiBuf] = await Promise.all([
+        fetchBinary("tools/TASM.EXE"),
+        fetchBinary("tools/TLINK.EXE"),
+        fetchBinary("tools/DPMI16BI.OVL", { optional: true }) // ← optional but recommended
       ]);
-      tasmBuf  = new Uint8Array(tasm);
-      tlinkBuf = new Uint8Array(tlink);
     }
 
-    // DOSBox config:
-    // NOTE: mount and drive switch must be in [autoexec], not [dos].
+    // DOSBox config: mount and drive switch must be in [autoexec]
     const DOS_CONF = `
 [sdl]
 fullscreen=false
@@ -111,10 +116,10 @@ echo js-dos (TASM/TLINK) ready
 BUILD
 `;
 
-    // Command interface holder (kept on window to avoid redeclaration if script runs twice)
+    // Command interface holder (kept on window to avoid redeclaration)
     window._dosCi = window._dosCi || null;
 
-    // Launch a fresh js-dos instance
+    // Launch js-dos with initial files
     function startDosWith(initFs) {
       elDos.innerHTML = ""; // reset container
       return new Promise((resolve) => {
@@ -133,8 +138,8 @@ BUILD
     }
 
     // BUILD.BAT for TASM/TLINK:
-    // - Assemble MAIN.ASM quietly to reduce prompts
-    // - On error, echo log and stop
+    // - Assemble MAIN.ASM
+    // - On error, show BUILD.LOG
     // - On success, link then run MAIN.EXE
     function buildBat() {
       return encoder.encode([
@@ -179,6 +184,11 @@ BUILD
           { path: "MAIN.ASM",  contents: encoder.encode(code) },
           { path: "BUILD.BAT", contents: buildBat() }
         ];
+
+        // If you provided the DPMI overlay, add it right next to TLINK.EXE
+        if (dpmiBuf) {
+          initFs.push({ path: "DPMI16BI.OVL", contents: dpmiBuf });
+        }
 
         await startDosWith(initFs);
         elStat.textContent = "Running in DOS...";
