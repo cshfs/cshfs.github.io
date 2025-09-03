@@ -15,7 +15,6 @@
     textarea { width: 100%; height: 520px; font-family: Consolas, Menlo, monospace; font-size: 14px; }
     #dosbox { width: 520px; height: 400px; border: 1px solid #ccc; }
     #runBtn { padding: 8px 14px; font-size: 16px; }
-    #out { background:#101010; color:#d7d7d7; padding:10px; height: 240px; overflow:auto; white-space: pre-wrap; }
     .bar { display:flex; gap:8px; align-items:center; margin:8px 0 0; }
     .small { color:#666; font-size: 12px; }
     h1 { margin-top: 0; }
@@ -24,7 +23,7 @@
 <body>
   <h1>8086 Assembly Runner</h1>
   <p class="small">
-    Paste TASM-style source (<code>.model small</code> etc.), click <b>Run</b>. Build output appears below; on success the EXE runs in DOS.
+    Paste TASM-style source (<code>.model small</code> etc.), click <b>Run</b>. All build messages and program I/O appear in the DOS screen.
     Your code is saved locally (browser) every time you press Run.
   </p>
 
@@ -35,13 +34,11 @@
         <button id="runBtn">Run</button>
         <span id="status" class="small"></span>
       </div>
-      <h3>Build & Program Output</h3>
-      <div id="out"></div>
     </div>
 
     <div>
       <div id="dosbox"></div>
-      <p class="small">Tip: scroll the output box for full logs; the DOS screen is just for the program run.</p>
+      <p class="small">Tip: the DOS screen shows both TASM/TLINK diagnostics and your program output.</p>
     </div>
   </div>
 
@@ -55,7 +52,6 @@
 
     const elCode  = document.getElementById('code');
     const elRun   = document.getElementById('runBtn');
-    const elOut   = document.getElementById('out');
     const elStat  = document.getElementById('status');
     const elDos   = document.getElementById('dosbox');
 
@@ -101,33 +97,26 @@
       tlinkBuf = new Uint8Array(tlink);
     }
 
-    // Print to output pane
-    function print(line = "") {
-      elOut.textContent += (line.endsWith("\n") ? line : line + "\n");
-      elOut.scrollTop = elOut.scrollHeight;
-    }
-
-    // DOSBox config: mount C: to working dir and auto-run BUILD.BAT
+    // DOSBox config:
+    // NOTE: mount and drive switch must be in [autoexec], not [dos].
     const DOS_CONF = `
 [sdl]
 fullscreen=false
 
-[dos]
-mount c .
-c:
-
 [autoexec]
 @echo off
+mount c .
+c:
 echo js-dos (TASM/TLINK) ready
 BUILD
 `;
 
-    // Command interface holder: avoid redeclaration by using window
+    // Command interface holder (kept on window to avoid redeclaration if script runs twice)
     window._dosCi = window._dosCi || null;
 
-    // Launch a fresh js-dos instance and hook stdout
+    // Launch a fresh js-dos instance
     function startDosWith(initFs) {
-      elDos.innerHTML = ""; // clean container
+      elDos.innerHTML = ""; // reset container
       return new Promise((resolve) => {
         Dos(elDos, {
           wdosboxUrl: WDO_URL,
@@ -136,9 +125,6 @@ BUILD
           onEvent: (event, payload) => {
             if (event === "ci-ready") {
               window._dosCi = payload;
-              if (window._dosCi && window._dosCi.events) {
-                window._dosCi.events().onStdout((msg) => print(msg));
-              }
               resolve();
             }
           }
@@ -148,7 +134,7 @@ BUILD
 
     // BUILD.BAT for TASM/TLINK:
     // - Assemble MAIN.ASM quietly to reduce prompts
-    // - On error, print BUILD.LOG and stop
+    // - On error, echo log and stop
     // - On success, link then run MAIN.EXE
     function buildBat() {
       return encoder.encode([
@@ -176,7 +162,6 @@ BUILD
     elRun.addEventListener('click', async () => {
       try {
         elRun.disabled = true;
-        elOut.textContent = "";
         elStat.textContent = "Preparing...";
 
         if (!tasmBuf || !tlinkBuf) {
@@ -196,11 +181,10 @@ BUILD
         ];
 
         await startDosWith(initFs);
-        elStat.textContent = "Running in DOS... (see output)";
+        elStat.textContent = "Running in DOS...";
       } catch (e) {
         console.error(e);
-        print("Error: " + (e?.message || e));
-        elStat.textContent = "Error";
+        elStat.textContent = "Error: " + (e?.message || e);
       } finally {
         elRun.disabled = false;
       }
