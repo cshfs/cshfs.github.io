@@ -40,7 +40,6 @@
 
     .shell {
       width: 100%;
-      /* Card width = frame width + horizontal paddings + border breathing space */
       max-width: calc(var(--w) + 64px);
       padding: 24px;
     }
@@ -79,11 +78,10 @@
         0 1px 0 rgba(255,255,255,0.03) inset,
         0 10px 30px rgba(0,0,0,0.25),
         0 0 0 1px rgba(255,255,255,0.02);
-      /* Key: width is larger than frame, and we center inner content */
       width: calc(var(--w) + 32px);
       padding: 16px;
       display: grid;
-      justify-items: center; /* centers the DOS frame horizontally */
+      justify-items: center;
       gap: 14px;
       margin: 0 auto;
     }
@@ -91,7 +89,8 @@
     /* DOS frame */
     #dosbox {
       width: var(--w);
-      height: var(--h);            border: 1px solid var(--border);
+      height: var(--h);
+      border: 1px solid var(--border);
       background: #000;
       box-shadow:
         0 0 0 1px rgba(255,255,255,0.03) inset,
@@ -107,6 +106,7 @@
       width: 100%;
       justify-content: center;
     }
+
     /* Pretty file input */
     .file {
       position: relative;
@@ -146,7 +146,7 @@
       box-shadow: 0 0 10px var(--ring);
     }
 
-    /* Action button (Reset) */
+    /* Buttons */
     .btn {
       padding: 10px 14px;
       border-radius: 10px;
@@ -155,7 +155,11 @@
       color: #e5e7eb;
       cursor: pointer;
     }
-    .btn:hover {
+    .btn[disabled] {
+      opacity: .5;
+      cursor: not-allowed;
+    }
+    .btn:hover:not([disabled]) {
       border-color: rgba(134,239,172,0.35);
       box-shadow: 0 0 0 4px var(--ring);
     }
@@ -184,6 +188,22 @@
       margin-top: 8px;
       opacity: .7;
     }
+
+    /* Drag-and-drop zone */
+    .drop {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px 16px;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
+      transition: box-shadow .2s ease, border-color .2s ease;
+    }
+    .drop.dragover {
+      border-color: rgba(134,239,172,0.55);
+      box-shadow: 0 0 0 6px var(--ring);
+    }
   </style>
 </head>
 <body>
@@ -200,14 +220,17 @@
       <div id="dosbox" aria-label="DOSBox frame"></div>
 
       <div class="controls" id="controls">
-        <label class="file">
-          <span class="badge"><span class="dot"></span>Select files to run</span>
-          <!-- Allow ANY file types; we'll validate in JS -->
-          <input id="fileInput" type="file" multiple />
-        </label>
+        <div id="dropZone" class="drop" aria-label="Drop files here">
+          Drag & drop files here, or
+          <label class="file" style="margin-left:8px">
+            <span class="badge"><span class="dot"></span>Add files</span>
+            <input id="fileInput" type="file" multiple />
+          </label>
+        </div>
+        <button id="startBtn" class="btn" disabled title="Start after adding exactly one .asm">Start</button>
       </div>
 
-      <ul id="fileList" class="files hidden" aria-label="Uploaded files"></ul>
+      <ul id="fileList" class="files hidden" aria-label="Selected files"></ul>
     </section>
 
     <div class="brandline"></div>
@@ -216,16 +239,15 @@
   <script>
     (function () {
       const DosGlobal = window.Dos;
-      if (!DosGlobal) {
-        alert("js-dos.js not found/loaded. Make sure js-dos.js is next to this HTML.");
-        return;
-      }
+      if (!DosGlobal) { alert("js-dos.js not found/loaded. Make sure js-dos.js is next to this HTML."); return; }
 
       const elDos    = document.getElementById('dosbox');
       const elInput  = document.getElementById('fileInput');
       const elFiles  = document.getElementById('fileList');
       const elCtrl   = document.getElementById('controls');
       const elReset  = document.getElementById('resetBtn');
+      const elDrop   = document.getElementById('dropZone');
+      const elStart  = document.getElementById('startBtn');
 
       const encoder = new TextEncoder();
       let currentPlayer = null;
@@ -247,7 +269,7 @@
         return n.endsWith('.asm');
       }
 
-      // ---------- Tool buffers (optional pieces auto-included if present) ----------
+      // ---------- Tool buffers ----------
       let tasmBuf=null, tlinkBuf=null, dpmiBuf=null, rtmBuf=null, tdBuf=null, tdCfgBuf=null;
       async function preloadTools(){
         const get = async (path, opt=false) => {
@@ -265,7 +287,7 @@
         ]);
       }
 
-      // ---------- DOS config (auto-runs BUILD.BAT, clears banner) ----------
+      // ---------- DOS config (auto-runs BUILD.BAT) ----------
       const DOS_CONF = `
 [sdl]
 fullscreen=false
@@ -312,14 +334,52 @@ BUILD
         });
       }
 
-      async function filesToInitFs(fileList){
-        const files = Array.from(fileList || []);
+      // ===== Accumulate selections without Ctrl/Cmd =====
+      const bag = new Map(); // name -> File
+
+      function countAsm(iterable) {
+        let c = 0;
+        for (const f of iterable) if (isAsm(f.name)) c++;
+        return c;
+      }
+
+      function addFiles(list) {
+        const incoming = Array.from(list || []);
+        const existingAsm = countAsm(bag.values());
+        let toAddAsm = 0;
+        for (const f of incoming) if (isAsm(f.name)) toAddAsm++;
+        if (existingAsm + toAddAsm > 1) {
+          alert('Select exactly ONE .asm file (you can add assets too). Extra .asm files were ignored.');
+        }
+        for (const f of incoming) {
+          if (isAsm(f.name) && existingAsm >= 1) continue; // ignore extra .asm
+          bag.set(f.name, f); // overwrite by name if re-added
+        }
+        refreshFilesListAndButtons();
+      }
+
+      function refreshFilesListAndButtons(){
+        const files = Array.from(bag.values());
+        elFiles.innerHTML = '';
+        for (const f of files) {
+          const li = document.createElement('li');
+          li.textContent = `${f.name}  →  ${toDos83(f.name)}`;
+          elFiles.appendChild(li);
+        }
+        if (files.length) elFiles.classList.remove('hidden');
+        elStart.disabled = (countAsm(files) !== 1);
+      }
+
+      async function bagToInitFs(){
+        const files = Array.from(bag.values());
         const asmFiles = files.filter(f => isAsm(f.name));
         if (asmFiles.length !== 1) {
-          if (asmFiles.length === 0) alert('Select at least one .asm file (you can add assets too).');
-          else alert('Select exactly ONE .asm file (you can add assets too).');
+          if (asmFiles.length === 0) alert('Add at least one .asm file.');
+          else alert('Keep exactly ONE .asm file.');
           throw new Error('Invalid ASM selection');
         }
+
+        if (!tasmBuf || !tlinkBuf) await preloadTools();
 
         const asmOriginalName = asmFiles[0].name;
         const dosAsmName = toDos83(asmOriginalName);
@@ -331,61 +391,64 @@ BUILD
           { path: dosAsmName,  contents: encoder.encode(asmText) },
           { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) }
         ];
-        // Optional extras (only add if present)
         if (dpmiBuf)  initFs.push({ path: 'DPMI16BI.OVL', contents: dpmiBuf });
         if (rtmBuf)   initFs.push({ path: 'RTM.EXE',      contents: rtmBuf  });
         if (tdBuf)    initFs.push({ path: 'TD.EXE',       contents: tdBuf   });
         if (tdCfgBuf) initFs.push({ path: 'TDCONFIG.TD',  contents: tdCfgBuf});
 
-        // Add all other selected files as DOS 8.3 names
         for (const f of files) {
           if (f === asmFiles[0]) continue;
           const dos = toDos83(f.name);
           const buf = new Uint8Array(await f.arrayBuffer());
           initFs.push({ path: dos, contents: buf });
         }
-
-        const list = files.map(f => `${f.name}  →  ${toDos83(f.name)}`);
-        return { initFs, displayList: list };
+        return initFs;
       }
 
-      function showFilesList(items){
-        elFiles.innerHTML = '';
-        for (const line of items) {
-          const li = document.createElement('li');
-          li.textContent = line;
-          elFiles.appendChild(li);
-        }
-        elFiles.classList.remove('hidden');
-      }
-
-      async function autoRunFromSelection(){
-        try {
-          if (!tasmBuf || !tlinkBuf) await preloadTools();
-          const { initFs, displayList } = await filesToInitFs(elInput.files);
-          elCtrl.classList.add('hidden');
-          showFilesList(displayList);
-          startDosWith(initFs);
-        } catch (e) {
-          console.error(e);
-        }
-      }
-
-      // Auto-run on valid selection
+      // ===== Drag & drop and multi-batch picking =====
       elInput.addEventListener('change', () => {
-        const files = Array.from(elInput.files || []);
-        const asmCount = files.filter(f => isAsm(f.name)).length;
-        if (asmCount === 1) {
-          autoRunFromSelection();
-        } else if (asmCount > 1) {
-          alert('Select exactly ONE .asm file (you can add assets too).');
+        addFiles(elInput.files);
+        // clear the input so the same filenames can be picked again later
+        elInput.value = '';
+      });
+
+      // Prevent the browser from opening the file on drop outside the zone
+      window.addEventListener('dragover', e => e.preventDefault());
+      window.addEventListener('drop',     e => e.preventDefault());
+
+      ['dragenter','dragover'].forEach(evt =>
+        elDrop.addEventListener(evt, e => { e.preventDefault(); elDrop.classList.add('dragover'); })
+      );
+      ['dragleave','drop'].forEach(evt =>
+        elDrop.addEventListener(evt, e => { e.preventDefault(); elDrop.classList.remove('dragover'); })
+      );
+      elDrop.addEventListener('drop', e => {
+        const dt = e.dataTransfer;
+        if (dt?.items) {
+          const files = [];
+          for (const item of dt.items) {
+            if (item.kind === 'file') {
+              const f = item.getAsFile();
+              if (f) files.push(f);
+            }
+          }
+          addFiles(files);
+        } else if (dt?.files) {
+          addFiles(dt.files);
         }
       });
 
-      // Reset brings file chooser back and clears current DOSBox
-      elReset.addEventListener('click', () => {
-        location.reload();
+      // ===== Start button =====
+      elStart.addEventListener('click', async () => {
+        try {
+          const initFs = await bagToInitFs();
+          elCtrl.classList.add('hidden');
+          startDosWith(initFs);
+        } catch (e) { console.error(e); }
       });
+
+      // Reset
+      elReset.addEventListener('click', () => { location.reload(); });
     })();
   </script>
 </body>
