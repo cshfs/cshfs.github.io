@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>DOSBox Emulator</title>
 
   <!-- Local js-dos UMD build (global window.Dos) -->
@@ -11,20 +11,19 @@
 
   <style>
     :root {
-      /* Adjust these if you want a different frame size */
-      --w: 1050px;
-      --h: 600px;
-
       /* Theme */
       --bg1: #0f172a;
       --bg2: #111827;
-      --card-bg: #0b1220;
       --text: #e5e7eb;
       --muted: #a3aed0;
       --accent: #86efac;
       --accent2:#22c55e;
       --border: rgba(255,255,255,0.08);
       --ring:   rgba(34,197,94,0.25);
+
+      /* Desktop max frame size target (kept for aspect) */
+      --frame-w: 1050;
+      --frame-h: 600;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -40,7 +39,7 @@
 
     .shell {
       width: 100%;
-      max-width: calc(var(--w) + 64px);
+      max-width: calc(var(--frame-w) * 1px + 64px);
       padding: 24px;
     }
 
@@ -78,7 +77,8 @@
         0 1px 0 rgba(255,255,255,0.03) inset,
         0 10px 30px rgba(0,0,0,0.25),
         0 0 0 1px rgba(255,255,255,0.02);
-      width: calc(var(--w) + 32px);
+      width: 100%;
+      max-width: calc(var(--frame-w) * 1px + 32px);
       padding: 16px;
       display: grid;
       justify-items: center;
@@ -86,16 +86,20 @@
       margin: 0 auto;
     }
 
-    /* DOS frame */
+    /* Fluid DOS frame: fills width, keeps 1050:600, scales nicely */
     #dosbox {
-      width: var(--w);
-      height: var(--h);
+      width: 100%;
+      max-width: calc(var(--frame-w) * 1px);
+      aspect-ratio: calc(var(--frame-w) / var(--frame-h));
       border: 1px solid var(--border);
       background: #000;
       box-shadow:
         0 0 0 1px rgba(255,255,255,0.03) inset,
         0 0 0 2px rgba(134,239,172,0.06),
         0 20px 50px rgba(0,0,0,.45);
+      /* Make scaled pixels crisp on mobile/retina */
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
     }
 
     .controls {
@@ -113,19 +117,16 @@
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      padding: 10px 14px;
+      padding: 12px 16px;
       color: #e5e7eb;
       background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
       border: 1px solid var(--border);
-      border-radius: 10px;
+      border-radius: 12px;
       cursor: pointer;
       box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset;
       transition: transform .02s ease, box-shadow .2s ease, border-color .2s ease;
     }
-    .file:hover {
-      border-color: rgba(134,239,172,0.35);
-      box-shadow: 0 0 0 4px var(--ring);
-    }
+    .file:hover { border-color: rgba(134,239,172,0.35); box-shadow: 0 0 0 4px var(--ring); }
     .file input[type="file"] {
       position: absolute;
       inset: 0;
@@ -137,7 +138,7 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      font-size: 13px;
+      font-size: 14px;
       color: #cbd5e1;
     }
     .file .dot {
@@ -148,21 +149,16 @@
 
     /* Buttons */
     .btn {
-      padding: 10px 14px;
-      border-radius: 10px;
+      padding: 12px 16px;
+      border-radius: 12px;
       background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
       border: 1px solid var(--border);
       color: #e5e7eb;
       cursor: pointer;
+      font-size: 14px;
     }
-    .btn[disabled] {
-      opacity: .5;
-      cursor: not-allowed;
-    }
-    .btn:hover:not([disabled]) {
-      border-color: rgba(134,239,172,0.35);
-      box-shadow: 0 0 0 4px var(--ring);
-    }
+    .btn[disabled] { opacity: .5; cursor: not-allowed; }
+    .btn:hover:not([disabled]) { border-color: rgba(134,239,172,0.35); box-shadow: 0 0 0 4px var(--ring); }
 
     /* Uploaded files list */
     ul.files {
@@ -170,13 +166,13 @@
       padding: 0;
       margin: 4px 0 0;
       width: 100%;
-      max-width: var(--w);
+      max-width: calc(var(--frame-w) * 1px);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
       color: #cbd5e1;
     }
     ul.files li {
-      padding: 4px 0;
+      padding: 6px 0;
       border-bottom: 1px dashed rgba(255,255,255,0.06);
     }
     .hidden { display: none !important; }
@@ -196,13 +192,23 @@
       gap: 8px;
       padding: 14px 16px;
       border: 1px dashed var(--border);
-      border-radius: 10px;
+      border-radius: 12px;
       background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015));
       transition: box-shadow .2s ease, border-color .2s ease;
+      text-align: center;
     }
-    .drop.dragover {
-      border-color: rgba(134,239,172,0.55);
-      box-shadow: 0 0 0 6px var(--ring);
+    .drop.dragover { border-color: rgba(134,239,172,0.55); box-shadow: 0 0 0 6px var(--ring); }
+
+    /* --- Mobile tweaks --- */
+    @media (max-width: 600px) {
+      .shell { padding: 12px; }
+      .title h1 { font-size: 18px; }
+      .btn, .file .badge { font-size: 15px; }
+      ul.files { font-size: 11px; }
+    }
+    /* Hide DnD on touch devices (still keep Add files button) */
+    @media (hover: none) and (pointer: coarse) {
+      .drop { display: none; }
     }
   </style>
 </head>
@@ -252,7 +258,6 @@
       const encoder = new TextEncoder();
       let currentPlayer = null;
 
-      // ---------- Helpers ----------
       function toDos83(name) {
         const idx = name.lastIndexOf('.');
         let base = (idx >= 0 ? name.slice(0, idx) : name).toUpperCase();
@@ -264,12 +269,10 @@
       }
       function isAsm(name){
         if (!name) return false;
-        let n = String(name).toLowerCase();
-        n = n.trim().replace(/[\.]+$/,'');
+        let n = String(name).toLowerCase().trim().replace(/[\.]+$/,'');
         return n.endsWith('.asm');
       }
 
-      // ---------- Tool buffers ----------
       let tasmBuf=null, tlinkBuf=null, dpmiBuf=null, rtmBuf=null, tdBuf=null, tdCfgBuf=null;
       async function preloadTools(){
         const get = async (path, opt=false) => {
@@ -287,7 +290,6 @@
         ]);
       }
 
-      // ---------- DOS config (auto-runs BUILD.BAT) ----------
       const DOS_CONF = `
 [sdl]
 fullscreen=false
@@ -302,20 +304,20 @@ BUILD
 
       function buildBatFor(dosAsmName){
         const base = dosAsmName.replace(/\.[^.]*$/, '');
-        const lines = [];
-        lines.push('@echo off');
-        lines.push('TASM /zi /q ' + dosAsmName + ' > BUILD.LOG');
-        lines.push('if errorlevel 1 goto ERR');
-        lines.push('TLINK /v ' + base + '.OBJ,,NUL,; >> BUILD.LOG');
-        lines.push('if errorlevel 1 goto ERR');
-        lines.push(base + '.EXE');
-        lines.push('echo.');
-        lines.push('goto END');
-        lines.push(':ERR');
-        lines.push('type BUILD.LOG');
-        lines.push(':END');
-        const bat = lines.join("\r\n") + "\r\n";
-        return encoder.encode(bat);
+        const lines = [
+          '@echo off',
+          'TASM /zi /q ' + dosAsmName + ' > BUILD.LOG',
+          'if errorlevel 1 goto ERR',
+          'TLINK /v ' + base + '.OBJ,,NUL,; >> BUILD.LOG',
+          'if errorlevel 1 goto ERR',
+          base + '.EXE',
+          'echo.',
+          'goto END',
+          ':ERR',
+          'type BUILD.LOG',
+          ':END'
+        ];
+        return encoder.encode(lines.join("\r\n") + "\r\n");
       }
 
       function startDosWith(initFs){
@@ -324,7 +326,7 @@ BUILD
         }
         elDos.innerHTML = '';
         currentPlayer = DosGlobal(elDos, {
-          pathPrefix: "emulators/",  // load emulator core locally
+          pathPrefix: "emulators/",
           dosboxConf: DOS_CONF,
           initFs,
           noCloud: true,
@@ -334,14 +336,9 @@ BUILD
         });
       }
 
-      // ===== Accumulate selections without Ctrl/Cmd =====
+      // Accumulate selections without Ctrl/Cmd
       const bag = new Map(); // name -> File
-
-      function countAsm(iterable) {
-        let c = 0;
-        for (const f of iterable) if (isAsm(f.name)) c++;
-        return c;
-      }
+      function countAsm(iterable) { let c=0; for (const f of iterable) if (isAsm(f.name)) c++; return c; }
 
       function addFiles(list) {
         const incoming = Array.from(list || []);
@@ -405,40 +402,37 @@ BUILD
         return initFs;
       }
 
-      // ===== Drag & drop and multi-batch picking =====
-      elInput.addEventListener('change', () => {
-        addFiles(elInput.files);
-        // clear the input so the same filenames can be picked again later
-        elInput.value = '';
-      });
+      // Drag & drop + multi-batch picking
+      elInput.addEventListener('change', () => { addFiles(elInput.files); elInput.value = ''; });
 
-      // Prevent the browser from opening the file on drop outside the zone
+      // Prevent browser from opening files on accidental outside-drop
       window.addEventListener('dragover', e => e.preventDefault());
       window.addEventListener('drop',     e => e.preventDefault());
 
-      ['dragenter','dragover'].forEach(evt =>
-        elDrop.addEventListener(evt, e => { e.preventDefault(); elDrop.classList.add('dragover'); })
-      );
-      ['dragleave','drop'].forEach(evt =>
-        elDrop.addEventListener(evt, e => { e.preventDefault(); elDrop.classList.remove('dragover'); })
-      );
-      elDrop.addEventListener('drop', e => {
-        const dt = e.dataTransfer;
-        if (dt?.items) {
-          const files = [];
-          for (const item of dt.items) {
-            if (item.kind === 'file') {
-              const f = item.getAsFile();
-              if (f) files.push(f);
+      if (elDrop) {
+        ['dragenter','dragover'].forEach(evt =>
+          elDrop.addEventListener(evt, e => { e.preventDefault(); elDrop.classList.add('dragover'); })
+        );
+        ['dragleave','drop'].forEach(evt =>
+          elDrop.addEventListener(evt, e => { e.preventDefault(); elDrop.classList.remove('dragover'); })
+        );
+        elDrop.addEventListener('drop', e => {
+          const dt = e.dataTransfer;
+          if (dt?.items) {
+            const files = [];
+            for (const item of dt.items) {
+              if (item.kind === 'file') {
+                const f = item.getAsFile();
+                if (f) files.push(f);
+              }
             }
+            addFiles(files);
+          } else if (dt?.files) {
+            addFiles(dt.files);
           }
-          addFiles(files);
-        } else if (dt?.files) {
-          addFiles(dt.files);
-        }
-      });
+        });
+      }
 
-      // ===== Start button =====
       elStart.addEventListener('click', async () => {
         try {
           const initFs = await bagToInitFs();
@@ -447,7 +441,6 @@ BUILD
         } catch (e) { console.error(e); }
       });
 
-      // Reset
       elReset.addEventListener('click', () => { location.reload(); });
     })();
   </script>
