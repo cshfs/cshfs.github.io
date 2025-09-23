@@ -18,10 +18,10 @@
     #dosbox { width: var(--w); height: var(--h); border: 1px solid #ddd; background: #000; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
     .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     input[type="file"]{ padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 8px; }
-    button { padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; font-size: 15px; transition: box-shadow .15s, transform .02s; }
+    button { padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; font-size: 15px; transition: background .15s, transform .02s; }
     button:active{ transform: translateY(1px); }
-    button:disabled{ opacity:.45; cursor:not-allowed; }
-    .ready { box-shadow: 0 0 0 2px rgba(0,0,0,.10); }
+    button:disabled{ opacity:.45; cursor:not-allowed; background:#fff; color:#000; }
+    .ready { background: #28a745; color: #fff; border-color: #28a745; }
     .status { min-height: 18px; font-size: 12px; color:#666; }
     .hidden { display:none !important; }
     ul.files { list-style: none; padding: 0; margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
@@ -61,10 +61,8 @@
 
     const encoder = new TextEncoder();
 
-    // Keep reference to current player to allow Stop
     let currentPlayer = null;
 
-    // Helper: map to DOS 8.3
     function toDos83(name) {
       const idx = name.lastIndexOf('.');
       let base = (idx >= 0 ? name.slice(0, idx) : name).toUpperCase();
@@ -75,25 +73,26 @@
       return ext ? `${base}.${ext}` : base;
     }
 
-    // Toolchain prefetch (optional TD + TDCONFIG)
-    let tasmBuf = null, tlinkBuf = null, dpmiBuf = null, rtmBuf = null, tdBuf = null, tdCfgBuf = null;
-    async function preloadTools() {
-      const get = async (path, opt = false) => {
-        const r = await fetch(path);
-        if (!r.ok) { if (opt) return null; throw new Error(path + ' not found'); }
-        return new Uint8Array(await r.arrayBuffer());
-      };
-      [tasmBuf, tlinkBuf, dpmiBuf, rtmBuf, tdBuf, tdCfgBuf] = await Promise.all([
+    function isAsm(name){
+      if (!name) return false;
+      const n = String(name).trim().toLowerCase();
+      return n.endsWith('.asm');
+    }
+
+    let tasmBuf=null,tlinkBuf=null,dpmiBuf=null,rtmBuf=null,tdBuf=null,tdCfgBuf=null;
+    async function preloadTools(){
+      const get=async(path,opt=false)=>{const r=await fetch(path);if(!r.ok){if(opt)return null;throw new Error(path+' not found');}return new Uint8Array(await r.arrayBuffer());};
+      [tasmBuf,tlinkBuf,dpmiBuf,rtmBuf,tdBuf,tdCfgBuf]=await Promise.all([
         get('tools/TASM.EXE'),
         get('tools/TLINK.EXE'),
-        get('tools/DPMI16BI.OVL', true),
-        get('tools/RTM.EXE', true),
-        get('tools/TD.EXE', true),              // Turbo Debugger (optional)
-        get('tools/TDCONFIG.TD', true)          // TD config (optional)
+        get('tools/DPMI16BI.OVL',true),
+        get('tools/RTM.EXE',true),
+        get('tools/TD.EXE',true),
+        get('tools/TDCONFIG.TD',true)
       ]);
     }
 
-    const DOS_CONF = `
+    const DOS_CONF=`
 [sdl]
 fullscreen=false
 
@@ -105,24 +104,23 @@ echo js-dos (TASM/TLINK) ready
 BUILD
 `;
 
-    function buildBatFor(dosAsmName, mode) {
-      const base = dosAsmName.replace(/\.[^.]*$/,'');
-      const lines = [
-        '@echo off',
-        `echo Assembling ${dosAsmName} (TASM)...`,
-        `TASM /q ${dosAsmName} > BUILD.LOG`,
-        'if errorlevel 1 goto ERR',
-        `echo Linking ${base}.OBJ (TLINK)...`,
-        `TLINK ${base}.OBJ,,NUL,; >> BUILD.LOG`,
-        'if errorlevel 1 goto ERR'
-      ];
-      if (mode === 'debug') {
-        lines.push(`echo Launching Turbo Debugger for ${base}.EXE...`);
-        lines.push(`if exist TD.EXE TD ${base}.EXE`);
-        lines.push(`if not exist TD.EXE ${base}.EXE`); // fallback if TD missing
-      } else {
-        lines.push(`echo Running ${base}.EXE...`);
-        lines.push(`${base}.EXE`);
+    function buildBatFor(dosAsmName, mode){
+      const base=dosAsmName.replace(/\.[^.]*$/,'');
+      const lines=[];
+      lines.push('@echo off');
+      lines.push('echo Assembling '+dosAsmName+' (TASM)...');
+      lines.push('TASM /q '+dosAsmName+' > BUILD.LOG');
+      lines.push('if errorlevel 1 goto ERR');
+      lines.push('echo Linking '+base+'.OBJ (TLINK)...');
+      lines.push('TLINK '+base+'.OBJ,,NUL,; >> BUILD.LOG');
+      lines.push('if errorlevel 1 goto ERR');
+      if(mode==='debug'){
+        lines.push('echo Launching Turbo Debugger for '+base+'.EXE...');
+        lines.push('if exist TD.EXE TD '+base+'.EXE');
+        lines.push('if not exist TD.EXE '+base+'.EXE');
+      }else{
+        lines.push('echo Running '+base+'.EXE...');
+        lines.push(base+'.EXE');
       }
       lines.push('goto END');
       lines.push(':ERR');
@@ -132,135 +130,76 @@ BUILD
       lines.push(':END');
       lines.push('echo.');
       lines.push('echo ===== DONE =====');
-      return encoder.encode(lines.join('
-'));
+      const bat=lines.join("\r\n");
+      return encoder.encode(bat);
     }
 
-    function startDosWith(initFs) {
-      // Clean previous player if any
-      if (currentPlayer && typeof currentPlayer.exit === 'function') {
-        try { currentPlayer.exit(); } catch {}
-      }
-      elDos.innerHTML = '';
-      return new Promise((resolve) => {
-        const p = Dos(elDos, {
-          wdosboxUrl: 'https://v8.js-dos.com/latest/wdosbox.js',
-          dosboxConf: DOS_CONF,
-          initFs,
-          onEvent: (ev) => { if (ev === 'ci-ready') resolve(p); }
-        });
-        // capture player when promise resolves
-        p.then(player => { currentPlayer = player; }).catch(() => {});
-      });
+    function startDosWith(initFs){
+      if(currentPlayer&&typeof currentPlayer.exit==='function'){try{currentPlayer.exit();}catch{}}
+      elDos.innerHTML='';
+      return Dos(elDos,{wdosboxUrl:'https://v8.js-dos.com/latest/wdosbox.js',dosboxConf:DOS_CONF,initFs}).then(player=>{currentPlayer=player;return player;});
     }
 
-    async function filesToInitFs(fileList, mode) {
-      // Validate exactly one .asm file
-      const files = Array.from(fileList || []);
-      const asmFiles = files.filter(f => /\.(asm)$/i.test(f.name));
-      if (asmFiles.length !== 1) {
-        throw new Error('Select exactly ONE .asm file (other files allowed too).');
-      }
-
-      const asmOriginalName = asmFiles[0].name; // for display
-      const dosAsmName = toDos83(asmOriginalName); // DOS-safe on disk
-      const asmText = await asmFiles[0].text();
-
-      const initFs = [
-        { path: 'TASM.EXE',  contents: tasmBuf },
-        { path: 'TLINK.EXE', contents: tlinkBuf },
-        { path: dosAsmName,  contents: encoder.encode(asmText) },
-        { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName, mode) }
+    async function filesToInitFs(fileList,mode){
+      const files=Array.from(fileList||[]);
+      const asmFiles=files.filter(f=>isAsm(f.name));
+      if(asmFiles.length!==1){throw new Error('Select exactly ONE .asm file (other files allowed too).');}
+      const asmOriginalName=asmFiles[0].name;
+      const dosAsmName=toDos83(asmOriginalName);
+      const asmText=await asmFiles[0].text();
+      const initFs=[
+        {path:'TASM.EXE',contents:tasmBuf},
+        {path:'TLINK.EXE',contents:tlinkBuf},
+        {path:dosAsmName,contents:encoder.encode(asmText)},
+        {path:'BUILD.BAT',contents:buildBatFor(dosAsmName,mode)}
       ];
-      if (dpmiBuf) initFs.push({ path: 'DPMI16BI.OVL', contents: dpmiBuf });
-      if (rtmBuf)  initFs.push({ path: 'RTM.EXE',      contents: rtmBuf  });
-      if (tdBuf)   initFs.push({ path: 'TD.EXE',       contents: tdBuf   });
-      if (tdCfgBuf) initFs.push({ path: 'TDCONFIG.TD', contents: tdCfgBuf });
-
-      // Other assets (keep their DOS 8.3 names)
-      for (const f of files) {
-        if (f === asmFiles[0]) continue;
-        const dos = toDos83(f.name);
-        const buf = new Uint8Array(await f.arrayBuffer());
-        initFs.push({ path: dos, contents: buf });
-      }
-
-      const list = files.map(f => `${f.name}  →  ${toDos83(f.name)}`);
-      return { initFs, displayList: list };
+      if(dpmiBuf)initFs.push({path:'DPMI16BI.OVL',contents:dpmiBuf});
+      if(rtmBuf)initFs.push({path:'RTM.EXE',contents:rtmBuf});
+      if(tdBuf)initFs.push({path:'TD.EXE',contents:tdBuf});
+      if(tdCfgBuf)initFs.push({path:'TDCONFIG.TD',contents:tdCfgBuf});
+      for(const f of files){if(f===asmFiles[0])continue;const dos=toDos83(f.name);const buf=new Uint8Array(await f.arrayBuffer());initFs.push({path:dos,contents:buf});}
+      const list=files.map(f=>`${f.name}  →  ${toDos83(f.name)}`);
+      return {initFs,displayList:list};
     }
 
-    function showFilesList(items) {
-      elFiles.innerHTML = '';
-      for (const line of items) {
-        const li = document.createElement('li');
-        li.textContent = line;
-        elFiles.appendChild(li);
-      }
-      elFiles.classList.remove('hidden');
+    function showFilesList(items){
+      elFiles.innerHTML='';
+      for(const line of items){const li=document.createElement('li');li.textContent=line;elFiles.appendChild(li);}elFiles.classList.remove('hidden');
     }
 
-    async function runWithMode(mode) {
-      try {
-        // Prepare tools
-        elRun.disabled = true; elDbg.disabled = true;
-        elStat.textContent = 'Preparing...';
-        if (!tasmBuf || !tlinkBuf) await preloadTools();
-
-        const { initFs, displayList } = await filesToInitFs(elInput.files, mode);
-
-        // Hide chooser + Run/Debug; show list + Stop
+    async function runWithMode(mode){
+      try{
+        elRun.disabled=true;elDbg.disabled=true;
+        elStat.textContent='Preparing...';
+        if(!tasmBuf||!tlinkBuf)await preloadTools();
+        const {initFs,displayList}=await filesToInitFs(elInput.files,mode);
         elCtrl.classList.add('hidden');
         showFilesList(displayList);
         elRTBar.classList.remove('hidden');
-
-        elStat.textContent = 'Starting DOS...';
+        elStat.textContent='Starting DOS...';
         await startDosWith(initFs);
-        elStat.textContent = (mode === 'debug')
-          ? 'Debugging... (Use TD keys; Ctrl+F9 to kill DOSBox)'
-          : 'Running... (Ctrl+C or Ctrl+Break to stop program; Ctrl+F9 to kill DOSBox)';
-      } catch (e) {
-        alert(e && e.message ? e.message : String(e));
-        elStat.textContent = '';
-        updateRunState();
-      }
+        elStat.textContent=(mode==='debug')?'Debugging... (Use TD keys; Ctrl+F9 to kill DOSBox)':'Running... (Ctrl+C or Ctrl+Break to stop program; Ctrl+F9 to kill DOSBox)';
+      }catch(e){alert(e&&e.message?e.message:String(e));elStat.textContent='';updateRunState();}
     }
 
-    elRun.addEventListener('click', () => runWithMode('run'));
-    elDbg.addEventListener('click', () => runWithMode('debug'));
+    elRun.addEventListener('click',()=>runWithMode('run'));
+    elDbg.addEventListener('click',()=>runWithMode('debug'));
 
-    // Stop button: terminate DOS session and restore controls
-    elStop.addEventListener('click', () => {
-      try { if (currentPlayer && typeof currentPlayer.exit === 'function') currentPlayer.exit(); } catch {}
-      elDos.innerHTML = '';
-      elRTBar.classList.add('hidden');
-      elFiles.classList.add('hidden');
-      elFiles.innerHTML = '';
-      elStat.textContent = 'Stopped.';
-      // Show controls again (note: browsers don't allow repopulating file inputs for security)
-      elCtrl.classList.remove('hidden');
-      updateRunState();
-    });
+    elStop.addEventListener('click',()=>{try{if(currentPlayer&&typeof currentPlayer.exit==='function')currentPlayer.exit();}catch{}elDos.innerHTML='';elRTBar.classList.add('hidden');elFiles.classList.add('hidden');elFiles.innerHTML='';elStat.textContent='Stopped.';elCtrl.classList.remove('hidden');updateRunState();});
 
-    // Enable/disable Run/Debug button and give clear visual cue
-    function updateRunState() {
-      const files = Array.from(elInput.files || []);
-      const asmCount = files.filter(f => /\.(asm)$/i.test(f.name)).length;
-      const ok = (asmCount === 1);
-      for (const btn of [elRun, elDbg]) {
-        btn.disabled = !ok;
-        btn.classList.toggle('ready', ok);
-        btn.title = ok ? (btn === elDbg ? 'Ready to Debug' : 'Ready to Run') : 'Select exactly one .asm file to enable';
-      }
-      if (asmCount === 0) {
-        elStat.textContent = 'Select one .asm file (you can add assets too).';
-      } else if (asmCount === 1) {
-        elStat.textContent = files.length > 1 ? '1 ASM + ' + (files.length - 1) + ' asset(s) selected. Click Run or Debug.' : '1 ASM selected. Click Run or Debug.';
-      } else {
-        elStat.textContent = 'Too many ASM files selected.';
-      }
+    function updateRunState(){
+      const files=Array.from(elInput.files||[]);
+      const asmCount=files.filter(f=>isAsm(f.name)).length;
+      const ok=(asmCount===1);
+      for(const btn of[elRun,elDbg]){btn.disabled=!ok;btn.classList.toggle('ready',ok);btn.title=ok?(btn===elDbg?'Ready to Debug':'Ready to Run'):'Select exactly one .asm file to enable';}
+      if(asmCount===0){elStat.textContent='Select one .asm file (you can add assets too).';}
+      else if(asmCount===1){elStat.textContent=files.length>1?'1 ASM + '+(files.length-1)+' asset(s) selected. Click Run or Debug.':'1 ASM selected. Click Run or Debug.';}
+      else{elStat.textContent='Too many ASM files selected.';}
     }
 
-    elInput.addEventListener('change', updateRunState);
+    elInput.addEventListener('change',updateRunState);
+    elInput.addEventListener('input',updateRunState);
+    updateRunState();
   }
   </script>
 </body>
