@@ -3,229 +3,76 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>8086 Assembly Runner (Uploads persisted, js-dos v8)</title>
+  <title>8086 Assembly Runner — Minimal</title>
 
   <!-- js-dos v8 CDN -->
   <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
   <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
 
   <style>
-    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
-    .grid { display: grid; grid-template-columns: 1fr 820px; gap: 16px; align-items: start; }
-    textarea { width: 100%; height: 560px; font-family: Consolas, Menlo, monospace; font-size: 14px; }
-    #dosbox { width: 800px; height: 600px; border: 1px solid #ccc; }
-    #runBtn, #clearBtn { padding: 8px 14px; font-size: 16px; }
-    .bar { display:flex; gap:12px; align-items:center; margin:8px 0 0; flex-wrap: wrap; }
-    .small { color:#666; font-size: 12px; }
-    .uploads { margin-top: 8px; }
-    .uploads ul { margin: 6px 0 0; padding-left: 18px; }
-    .uploads li { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-    h1 { margin-top: 0; }
-    .chip { display:inline-block; padding:2px 6px; border:1px solid #ccc; border-radius: 6px; background:#fafafa; }
+    :root { --w: 800px; --h: 600px; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; min-height: 100dvh; display: grid; place-items: center; background: #f7f7f9; }
+    .wrap { width: 100%; max-width: calc(var(--w) + 32px); padding: 16px; }
+    .center { display: grid; justify-items: center; gap: 12px; }
+    #dosbox { width: var(--w); height: var(--h); border: 1px solid #ddd; background: #000; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
+    .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    input[type="file"]{ padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 8px; }
+    button { padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; font-size: 15px; }
+    button:disabled{ opacity:.5; cursor:not-allowed; }
+    .status { min-height: 18px; font-size: 12px; color:#666; }
   </style>
 </head>
 <body>
-  <h1>8086 Assembly Runner</h1>
-  <p class="small">
-    Paste TASM-style source (<code>.model small</code> etc.), upload any files once, then click <b>Run</b>.  
-    A fresh DOS VM starts each time; your uploaded files are auto-injected from browser storage.  
-    Uploading the same name again overwrites the stored copy. Your source text is saved locally on each run.
-  </p>
-
-  <div class="grid">
-    <div>
-      <textarea id="code"></textarea>
-      <div class="bar">
-        <input type="file" id="fileInput" multiple />
-        <button id="runBtn">Run</button>
-        <button id="clearBtn" title="Delete all persisted uploaded files">Clear stored files</button>
-        <span id="status" class="small"></span>
-      </div>
-
-      <div class="uploads">
-        <span class="small">Stored files for <span class="chip">C:\</span> (original → DOS 8.3):</span>
-        <ul id="fileList"></ul>
-      </div>
-    </div>
-
-    <div>
+  <div class="wrap">
+    <div class="center">
       <div id="dosbox"></div>
-      <p class="small">
-        Refer to files by their DOS 8.3 names (e.g., <code>TEST.BMP</code>, <code>DATA.TXT</code>).  
-        Keyboard & mouse work inside the DOS frame—click inside to focus.
-      </p>
+      <div class="bar">
+        <input id="fileInput" type="file" multiple />
+        <button id="runBtn">Run</button>
+      </div>
+      <div class="status" id="status"></div>
     </div>
   </div>
 
   <script>
-  if (!window.__asmRunnerInit__) {
-    window.__asmRunnerInit__ = true;
+  if (!window.__asmRunnerMinimal__) {
+    window.__asmRunnerMinimal__ = true;
 
-    // Elements
-    const elCode  = document.getElementById('code');
-    const elRun   = document.getElementById('runBtn');
-    const elClear = document.getElementById('clearBtn');
-    const elStat  = document.getElementById('status');
     const elDos   = document.getElementById('dosbox');
-    const elList  = document.getElementById('fileList');
+    const elRun   = document.getElementById('runBtn');
+    const elInput = document.getElementById('fileInput');
+    const elStat  = document.getElementById('status');
 
-    const LS_KEY  = "asm-editor-text-v1";
     const encoder = new TextEncoder();
 
-    // Default starter code
-    const DEFAULT_SRC = [
-      "; Sample TASM program (EXE) for 8086",
-      ".model small",
-      ".stack 100h",
-      ".data",
-      "msg db 'Hello from TASM!$'",
-      ".code",
-      "main proc",
-      "    mov ax, @data",
-      "    mov ds, ax",
-      "    mov dx, offset msg",
-      "    mov ah, 9",
-      "    int 21h",
-      "    mov ax, 4C00h",
-      "    int 21h",
-      "main endp",
-      "end main"
-    ].join("\n");
-    elCode.value = localStorage.getItem(LS_KEY) || DEFAULT_SRC;
-
-    // -------- DOS 8.3 mapping --------
+    // Helper: map to DOS 8.3
     function toDos83(name) {
-      const idx = name.lastIndexOf(".");
+      const idx = name.lastIndexOf('.');
       let base = (idx >= 0 ? name.slice(0, idx) : name).toUpperCase();
-      let ext  = (idx >= 0 ? name.slice(idx + 1) : "").toUpperCase();
-      const clean = s => s.replace(/[^A-Z0-9]/g, "_");
+      let ext  = (idx >= 0 ? name.slice(idx + 1) : '').toUpperCase();
+      const clean = s => s.replace(/[^A-Z0-9]/g, '_');
       base = clean(base).slice(0, 8);
       ext  = clean(ext).slice(0, 3);
       return ext ? `${base}.${ext}` : base;
     }
 
-    // -------- IndexedDB persistence for uploaded files --------
-    // DB schema: db "asm-dos-files" / store "files" with keyPath "dosName"
-    // Value: { original: string, dosName: string, bytes: ArrayBuffer }
-    let db = null;
-
-    function idbOpen() {
-      return new Promise((resolve, reject) => {
-        const req = indexedDB.open("asm-dos-files", 1);
-        req.onupgradeneeded = (e) => {
-          const db = e.target.result;
-          if (!db.objectStoreNames.contains("files")) {
-            db.createObjectStore("files", { keyPath: "dosName" });
-          }
-        };
-        req.onsuccess = () => { db = req.result; resolve(db); };
-        req.onerror = () => reject(req.error);
-      });
-    }
-
-    function idbPut(fileRec) {
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction("files", "readwrite");
-        const store = tx.objectStore("files");
-        const req = store.put(fileRec);
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      });
-    }
-
-    function idbGetAll() {
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction("files", "readonly");
-        const store = tx.objectStore("files");
-        const req = store.getAll();
-        req.onsuccess = () => resolve(req.result || []);
-        req.onerror = () => reject(req.error);
-      });
-    }
-
-    function idbClear() {
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction("files", "readwrite");
-        const store = tx.objectStore("files");
-        const req = store.clear();
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      });
-    }
-
-    // Load persisted files to show list
-    async function refreshListUI() {
-      const files = await idbGetAll();
-      elList.innerHTML = "";
-      files.forEach(f => {
-        const li = document.createElement("li");
-        li.textContent = `${f.original}  →  ${f.dosName}`;
-        elList.appendChild(li);
-      });
-      elStat.textContent = `${files.length} file(s) stored`;
-    }
-
-    // Handle uploads → persist (overwrite on same DOS name), then refresh list
-    document.getElementById('fileInput').addEventListener('change', async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (!files.length) return;
-      elStat.textContent = "Reading files...";
-      try {
-        await idbOpen(); // ensure DB
-        // Build a set of existing DOS names to avoid collisions (we'll allow overwrite on same dosName)
-        const existing = new Set((await idbGetAll()).map(f => f.dosName));
-
-        for (const file of files) {
-          const dos = toDos83(file.name);
-          // Read as ArrayBuffer
-          const buf = await file.arrayBuffer();
-          // Store (overwrite if same dosName)
-          await idbPut({ original: file.name, dosName: dos, bytes: buf });
-          existing.add(dos);
-        }
-        await refreshListUI();
-        elStat.textContent = "Files stored. (They’ll be auto-loaded on Run)";
-      } catch (err) {
-        console.error(err);
-        elStat.textContent = "Error storing files";
-      }
-    });
-
-    // Clear button
-    elClear.addEventListener('click', async () => {
-      try {
-        await idbOpen();
-        await idbClear();
-        await refreshListUI();
-        elStat.textContent = "Stored files cleared.";
-      } catch (err) {
-        console.error(err);
-        elStat.textContent = "Error clearing files";
-      }
-    });
-
-    // Initialize DB and list on load
-    (async () => {
-      try { await idbOpen(); await refreshListUI(); } catch {}
-    })();
-
-    // -------- Toolchain (from repo) --------
+    // Toolchain prefetch
     let tasmBuf = null, tlinkBuf = null, dpmiBuf = null, rtmBuf = null;
     async function preloadTools() {
       const get = async (path, opt = false) => {
         const r = await fetch(path);
-        if (!r.ok) { if (opt) return null; throw new Error(path + " not found"); }
+        if (!r.ok) { if (opt) return null; throw new Error(path + ' not found'); }
         return new Uint8Array(await r.arrayBuffer());
       };
       [tasmBuf, tlinkBuf, dpmiBuf, rtmBuf] = await Promise.all([
-        get("tools/TASM.EXE"),
-        get("tools/TLINK.EXE"),
-        get("tools/DPMI16BI.OVL", true),
-        get("tools/RTM.EXE", true)
+        get('tools/TASM.EXE'),
+        get('tools/TLINK.EXE'),
+        get('tools/DPMI16BI.OVL', true),
+        get('tools/RTM.EXE', true)
       ]);
     }
 
-    // -------- DOS config: fresh VM each run, auto-run BUILD --------
     const DOS_CONF = `
 [sdl]
 fullscreen=false
@@ -240,82 +87,94 @@ BUILD
 
     function buildBat() {
       return encoder.encode([
-        "@echo off",
-        "echo Assembling MAIN.ASM (TASM)...",
-        "TASM /q MAIN.ASM > BUILD.LOG",
-        "if errorlevel 1 goto ERR",
-        "echo Linking MAIN.OBJ (TLINK)...",
-        "TLINK MAIN.OBJ,,NUL,; >> BUILD.LOG",
-        "if errorlevel 1 goto ERR",
-        "echo Running MAIN.EXE...",
-        "MAIN.EXE",
-        "goto END",
-        ":ERR",
-        "echo.",
-        "echo ===== BUILD FAILED =====",
-        "type BUILD.LOG",
-        ":END",
-        "echo.",
-        "echo ===== DONE ====="
-      ].join("\r\n"));
+        '@echo off',
+        'echo Assembling MAIN.ASM (TASM)...',
+        'TASM /q MAIN.ASM > BUILD.LOG',
+        'if errorlevel 1 goto ERR',
+        'echo Linking MAIN.OBJ (TLINK)...',
+        'TLINK MAIN.OBJ,,NUL,; >> BUILD.LOG',
+        'if errorlevel 1 goto ERR',
+        'echo Running MAIN.EXE...',
+        'MAIN.EXE',
+        'goto END',
+        ':ERR',
+        'echo.',
+        'echo ===== BUILD FAILED =====',
+        'type BUILD.LOG',
+        ':END',
+        'echo.',
+        'echo ===== DONE ====='
+      ].join('\r\n'));
     }
 
-    // Start a fresh VM with provided files
     function startDosWith(initFs) {
-      elDos.innerHTML = ""; // reset container
+      elDos.innerHTML = '';
       return new Promise((resolve) => {
         Dos(elDos, {
-          wdosboxUrl: "https://v8.js-dos.com/latest/wdosbox.js",
+          wdosboxUrl: 'https://v8.js-dos.com/latest/wdosbox.js',
           dosboxConf: DOS_CONF,
           initFs,
-          onEvent: (event) => {
-            if (event === "ci-ready") resolve();
-          }
+          onEvent: (ev) => { if (ev === 'ci-ready') resolve(); }
         });
       });
     }
 
-    // RUN: gather persisted files → boot VM fresh → auto BUILD
+    async function filesToInitFs(fileList) {
+      // Validate exactly one .asm file
+      const files = Array.from(fileList || []);
+      const asmFiles = files.filter(f => /\.(asm)$/i.test(f.name));
+      if (asmFiles.length !== 1) {
+        throw new Error('Select exactly ONE .asm file (other files allowed too).');
+      }
+
+      // Read ASM text and other file bytes
+      const asmText = await asmFiles[0].text();
+
+      const initFs = [
+        { path: 'TASM.EXE',  contents: tasmBuf },
+        { path: 'TLINK.EXE', contents: tlinkBuf },
+        { path: 'MAIN.ASM',  contents: encoder.encode(asmText) },
+        { path: 'BUILD.BAT', contents: buildBat() }
+      ];
+      if (dpmiBuf) initFs.push({ path: 'DPMI16BI.OVL', contents: dpmiBuf });
+      if (rtmBuf)  initFs.push({ path: 'RTM.EXE',      contents: rtmBuf  });
+
+      for (const f of files) {
+        if (f === asmFiles[0]) continue; // ASM already mapped to MAIN.ASM
+        const dos = toDos83(f.name);
+        const buf = new Uint8Array(await f.arrayBuffer());
+        initFs.push({ path: dos, contents: buf });
+      }
+      return initFs;
+    }
+
     elRun.addEventListener('click', async () => {
       try {
         elRun.disabled = true;
-        elStat.textContent = "Preparing files...";
-
-        // Save editor text
-        const sourceText = elCode.value || "";
-        localStorage.setItem(LS_KEY, sourceText);
-
-        // Ensure toolchain
+        elStat.textContent = 'Preparing...';
         if (!tasmBuf || !tlinkBuf) await preloadTools();
-
-        // Get persisted uploads from IndexedDB
-        await idbOpen();
-        const stored = await idbGetAll(); // [{original, dosName, bytes(ArrayBuffer)}]
-        await refreshListUI();
-
-        // Build init FS
-        const initFs = [
-          { path: "TASM.EXE",  contents: tasmBuf },
-          { path: "TLINK.EXE", contents: tlinkBuf },
-          { path: "MAIN.ASM",  contents: encoder.encode(sourceText) },
-          { path: "BUILD.BAT", contents: buildBat() }
-        ];
-        if (dpmiBuf) initFs.push({ path: "DPMI16BI.OVL", contents: dpmiBuf });
-        if (rtmBuf)  initFs.push({ path: "RTM.EXE",      contents: rtmBuf  });
-
-        // Add persisted files
-        for (const f of stored) {
-          initFs.push({ path: f.dosName, contents: new Uint8Array(f.bytes) });
-        }
-
-        elStat.textContent = "Starting DOS...";
+        const initFs = await filesToInitFs(elInput.files);
+        elStat.textContent = 'Starting DOS...';
         await startDosWith(initFs);
-        elStat.textContent = "Running in DOS...";
+        elStat.textContent = 'Running...';
       } catch (e) {
-        console.error(e);
-        elStat.textContent = "Error: " + (e?.message || e);
+        alert(e && e.message ? e.message : String(e));
+        elStat.textContent = '';
       } finally {
         elRun.disabled = false;
+      }
+    });
+
+    // Immediate validation feedback on selection
+    elInput.addEventListener('change', () => {
+      const files = Array.from(elInput.files || []);
+      const asmCount = files.filter(f => /\.(asm)$/i.test(f.name)).length;
+      if (asmCount === 0) {
+        elStat.textContent = 'Select one .asm file (you can add assets too).';
+      } else if (asmCount === 1) {
+        elStat.textContent = files.length > 1 ? '1 ASM + ' + (files.length - 1) + ' asset(s) selected.' : '1 ASM selected.';
+      } else {
+        elStat.textContent = 'Too many ASM files selected.';
       }
     });
   }
