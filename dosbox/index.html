@@ -18,20 +18,30 @@
     #dosbox { width: var(--w); height: var(--h); border: 1px solid #ddd; background: #000; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
     .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     input[type="file"]{ padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 8px; }
-    button { padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; font-size: 15px; }
-    button:disabled{ opacity:.5; cursor:not-allowed; }
+    button { padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; font-size: 15px; transition: box-shadow .15s, transform .02s; }
+    button:active{ transform: translateY(1px); }
+    button:disabled{ opacity:.45; cursor:not-allowed; }
+    .ready { box-shadow: 0 0 0 2px rgba(0,0,0,.10); }
     .status { min-height: 18px; font-size: 12px; color:#666; }
+    .hidden { display:none !important; }
+    ul.files { list-style: none; padding: 0; margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    ul.files li { padding: 2px 0; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="center">
-      <div id="dosbox"></div>
-      <div class="bar">
-        <input id="fileInput" type="file" multiple />
-        <button id="runBtn">Run</button>
+      <div id="dosbox" aria-label="DOSBox"></div>
+      <div class="bar" id="controls">
+        <input id="fileInput" type="file" multiple aria-label="Select one .asm file and any asset files" />
+        <button id="runBtn" title="Select exactly one .asm file to enable Run" disabled>Run</button>
+        <button id="dbgBtn" title="Debug with TD (Turbo Debugger)" disabled>Debug</button>
       </div>
-      <div class="status" id="status"></div>
+      <div class="bar hidden" id="runtimeBar">
+        <button id="stopBtn" title="Stop the running DOS session">Stop</button>
+      </div>
+      <div class="status" id="status" aria-live="polite"></div>
+      <ul id="fileList" class="files hidden" aria-label="Uploaded files"></ul>
     </div>
   </div>
 
@@ -39,12 +49,20 @@
   if (!window.__asmRunnerMinimal__) {
     window.__asmRunnerMinimal__ = true;
 
-    const elDos   = document.getElementById('dosbox');
-    const elRun   = document.getElementById('runBtn');
-    const elInput = document.getElementById('fileInput');
-    const elStat  = document.getElementById('status');
+    const elDos    = document.getElementById('dosbox');
+    const elRun    = document.getElementById('runBtn');
+    const elDbg    = document.getElementById('dbgBtn');
+    const elStop   = document.getElementById('stopBtn');
+    const elInput  = document.getElementById('fileInput');
+    const elStat   = document.getElementById('status');
+    const elFiles  = document.getElementById('fileList');
+    const elCtrl   = document.getElementById('controls');
+    const elRTBar  = document.getElementById('runtimeBar');
 
     const encoder = new TextEncoder();
+
+    // Keep reference to current player to allow Stop
+    let currentPlayer = null;
 
     // Helper: map to DOS 8.3
     function toDos83(name) {
@@ -57,19 +75,21 @@
       return ext ? `${base}.${ext}` : base;
     }
 
-    // Toolchain prefetch
-    let tasmBuf = null, tlinkBuf = null, dpmiBuf = null, rtmBuf = null;
+    // Toolchain prefetch (optional TD + TDCONFIG)
+    let tasmBuf = null, tlinkBuf = null, dpmiBuf = null, rtmBuf = null, tdBuf = null, tdCfgBuf = null;
     async function preloadTools() {
       const get = async (path, opt = false) => {
         const r = await fetch(path);
         if (!r.ok) { if (opt) return null; throw new Error(path + ' not found'); }
         return new Uint8Array(await r.arrayBuffer());
       };
-      [tasmBuf, tlinkBuf, dpmiBuf, rtmBuf] = await Promise.all([
+      [tasmBuf, tlinkBuf, dpmiBuf, rtmBuf, tdBuf, tdCfgBuf] = await Promise.all([
         get('tools/TASM.EXE'),
         get('tools/TLINK.EXE'),
         get('tools/DPMI16BI.OVL', true),
-        get('tools/RTM.EXE', true)
+        get('tools/RTM.EXE', true),
+        get('tools/TD.EXE', true),              // Turbo Debugger (optional)
+        get('tools/TDCONFIG.TD', true)          // TD config (optional)
       ]);
     }
 
@@ -85,41 +105,56 @@ echo js-dos (TASM/TLINK) ready
 BUILD
 `;
 
-    function buildBat() {
-      return encoder.encode([
+    function buildBatFor(dosAsmName, mode) {
+      const base = dosAsmName.replace(/\.[^.]*$/,'');
+      const lines = [
         '@echo off',
-        'echo Assembling MAIN.ASM (TASM)...',
-        'TASM /q MAIN.ASM > BUILD.LOG',
+        `echo Assembling ${dosAsmName} (TASM)...`,
+        `TASM /q ${dosAsmName} > BUILD.LOG`,
         'if errorlevel 1 goto ERR',
-        'echo Linking MAIN.OBJ (TLINK)...',
-        'TLINK MAIN.OBJ,,NUL,; >> BUILD.LOG',
-        'if errorlevel 1 goto ERR',
-        'echo Running MAIN.EXE...',
-        'MAIN.EXE',
-        'goto END',
-        ':ERR',
-        'echo.',
-        'echo ===== BUILD FAILED =====',
-        'type BUILD.LOG',
-        ':END',
-        'echo.',
-        'echo ===== DONE ====='
-      ].join('\r\n'));
+        `echo Linking ${base}.OBJ (TLINK)...`,
+        `TLINK ${base}.OBJ,,NUL,; >> BUILD.LOG`,
+        'if errorlevel 1 goto ERR'
+      ];
+      if (mode === 'debug') {
+        lines.push(`echo Launching Turbo Debugger for ${base}.EXE...`);
+        lines.push(`if exist TD.EXE TD ${base}.EXE`);
+        lines.push(`if not exist TD.EXE ${base}.EXE`); // fallback if TD missing
+      } else {
+        lines.push(`echo Running ${base}.EXE...`);
+        lines.push(`${base}.EXE`);
+      }
+      lines.push('goto END');
+      lines.push(':ERR');
+      lines.push('echo.');
+      lines.push('echo ===== BUILD FAILED =====');
+      lines.push('type BUILD.LOG');
+      lines.push(':END');
+      lines.push('echo.');
+      lines.push('echo ===== DONE =====');
+      return encoder.encode(lines.join('
+'));
     }
 
     function startDosWith(initFs) {
+      // Clean previous player if any
+      if (currentPlayer && typeof currentPlayer.exit === 'function') {
+        try { currentPlayer.exit(); } catch {}
+      }
       elDos.innerHTML = '';
       return new Promise((resolve) => {
-        Dos(elDos, {
+        const p = Dos(elDos, {
           wdosboxUrl: 'https://v8.js-dos.com/latest/wdosbox.js',
           dosboxConf: DOS_CONF,
           initFs,
-          onEvent: (ev) => { if (ev === 'ci-ready') resolve(); }
+          onEvent: (ev) => { if (ev === 'ci-ready') resolve(p); }
         });
+        // capture player when promise resolves
+        p.then(player => { currentPlayer = player; }).catch(() => {});
       });
     }
 
-    async function filesToInitFs(fileList) {
+    async function filesToInitFs(fileList, mode) {
       // Validate exactly one .asm file
       const files = Array.from(fileList || []);
       const asmFiles = files.filter(f => /\.(asm)$/i.test(f.name));
@@ -127,56 +162,105 @@ BUILD
         throw new Error('Select exactly ONE .asm file (other files allowed too).');
       }
 
-      // Read ASM text and other file bytes
+      const asmOriginalName = asmFiles[0].name; // for display
+      const dosAsmName = toDos83(asmOriginalName); // DOS-safe on disk
       const asmText = await asmFiles[0].text();
 
       const initFs = [
         { path: 'TASM.EXE',  contents: tasmBuf },
         { path: 'TLINK.EXE', contents: tlinkBuf },
-        { path: 'MAIN.ASM',  contents: encoder.encode(asmText) },
-        { path: 'BUILD.BAT', contents: buildBat() }
+        { path: dosAsmName,  contents: encoder.encode(asmText) },
+        { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName, mode) }
       ];
       if (dpmiBuf) initFs.push({ path: 'DPMI16BI.OVL', contents: dpmiBuf });
       if (rtmBuf)  initFs.push({ path: 'RTM.EXE',      contents: rtmBuf  });
+      if (tdBuf)   initFs.push({ path: 'TD.EXE',       contents: tdBuf   });
+      if (tdCfgBuf) initFs.push({ path: 'TDCONFIG.TD', contents: tdCfgBuf });
 
+      // Other assets (keep their DOS 8.3 names)
       for (const f of files) {
-        if (f === asmFiles[0]) continue; // ASM already mapped to MAIN.ASM
+        if (f === asmFiles[0]) continue;
         const dos = toDos83(f.name);
         const buf = new Uint8Array(await f.arrayBuffer());
         initFs.push({ path: dos, contents: buf });
       }
-      return initFs;
+
+      const list = files.map(f => `${f.name}  →  ${toDos83(f.name)}`);
+      return { initFs, displayList: list };
     }
 
-    elRun.addEventListener('click', async () => {
+    function showFilesList(items) {
+      elFiles.innerHTML = '';
+      for (const line of items) {
+        const li = document.createElement('li');
+        li.textContent = line;
+        elFiles.appendChild(li);
+      }
+      elFiles.classList.remove('hidden');
+    }
+
+    async function runWithMode(mode) {
       try {
-        elRun.disabled = true;
+        // Prepare tools
+        elRun.disabled = true; elDbg.disabled = true;
         elStat.textContent = 'Preparing...';
         if (!tasmBuf || !tlinkBuf) await preloadTools();
-        const initFs = await filesToInitFs(elInput.files);
+
+        const { initFs, displayList } = await filesToInitFs(elInput.files, mode);
+
+        // Hide chooser + Run/Debug; show list + Stop
+        elCtrl.classList.add('hidden');
+        showFilesList(displayList);
+        elRTBar.classList.remove('hidden');
+
         elStat.textContent = 'Starting DOS...';
         await startDosWith(initFs);
-        elStat.textContent = 'Running...';
+        elStat.textContent = (mode === 'debug')
+          ? 'Debugging... (Use TD keys; Ctrl+F9 to kill DOSBox)'
+          : 'Running... (Ctrl+C or Ctrl+Break to stop program; Ctrl+F9 to kill DOSBox)';
       } catch (e) {
         alert(e && e.message ? e.message : String(e));
         elStat.textContent = '';
-      } finally {
-        elRun.disabled = false;
+        updateRunState();
       }
+    }
+
+    elRun.addEventListener('click', () => runWithMode('run'));
+    elDbg.addEventListener('click', () => runWithMode('debug'));
+
+    // Stop button: terminate DOS session and restore controls
+    elStop.addEventListener('click', () => {
+      try { if (currentPlayer && typeof currentPlayer.exit === 'function') currentPlayer.exit(); } catch {}
+      elDos.innerHTML = '';
+      elRTBar.classList.add('hidden');
+      elFiles.classList.add('hidden');
+      elFiles.innerHTML = '';
+      elStat.textContent = 'Stopped.';
+      // Show controls again (note: browsers don't allow repopulating file inputs for security)
+      elCtrl.classList.remove('hidden');
+      updateRunState();
     });
 
-    // Immediate validation feedback on selection
-    elInput.addEventListener('change', () => {
+    // Enable/disable Run/Debug button and give clear visual cue
+    function updateRunState() {
       const files = Array.from(elInput.files || []);
       const asmCount = files.filter(f => /\.(asm)$/i.test(f.name)).length;
+      const ok = (asmCount === 1);
+      for (const btn of [elRun, elDbg]) {
+        btn.disabled = !ok;
+        btn.classList.toggle('ready', ok);
+        btn.title = ok ? (btn === elDbg ? 'Ready to Debug' : 'Ready to Run') : 'Select exactly one .asm file to enable';
+      }
       if (asmCount === 0) {
         elStat.textContent = 'Select one .asm file (you can add assets too).';
       } else if (asmCount === 1) {
-        elStat.textContent = files.length > 1 ? '1 ASM + ' + (files.length - 1) + ' asset(s) selected.' : '1 ASM selected.';
+        elStat.textContent = files.length > 1 ? '1 ASM + ' + (files.length - 1) + ' asset(s) selected. Click Run or Debug.' : '1 ASM selected. Click Run or Debug.';
       } else {
         elStat.textContent = 'Too many ASM files selected.';
       }
-    });
+    }
+
+    elInput.addEventListener('change', updateRunState);
   }
   </script>
 </body>
