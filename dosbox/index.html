@@ -37,9 +37,6 @@
         <button id="runBtn" title="Select exactly one .asm file to enable Run" disabled>Run</button>
         <button id="dbgBtn" title="Debug with TD (Turbo Debugger)" disabled>Debug</button>
       </div>
-      <div class="bar hidden" id="runtimeBar">
-        <button id="stopBtn" title="Stop the running DOS session">Stop</button>
-      </div>
       <div class="status" id="status" aria-live="polite"></div>
       <ul id="fileList" class="files hidden" aria-label="Uploaded files"></ul>
     </div>
@@ -52,12 +49,10 @@
     const elDos    = document.getElementById('dosbox');
     const elRun    = document.getElementById('runBtn');
     const elDbg    = document.getElementById('dbgBtn');
-    const elStop   = document.getElementById('stopBtn');
     const elInput  = document.getElementById('fileInput');
     const elStat   = document.getElementById('status');
     const elFiles  = document.getElementById('fileList');
     const elCtrl   = document.getElementById('controls');
-    const elRTBar  = document.getElementById('runtimeBar');
 
     const encoder = new TextEncoder();
 
@@ -134,10 +129,17 @@ BUILD
       return encoder.encode(bat);
     }
 
+    // Support both promise and direct player returns from Dos(...)
     function startDosWith(initFs){
       if(currentPlayer&&typeof currentPlayer.exit==='function'){try{currentPlayer.exit();}catch{}}
       elDos.innerHTML='';
-      return Dos(elDos,{wdosboxUrl:'https://v8.js-dos.com/latest/wdosbox.js',dosboxConf:DOS_CONF,initFs}).then(player=>{currentPlayer=player;return player;});
+      const result = Dos(elDos,{wdosboxUrl:'https://v8.js-dos.com/latest/wdosbox.js',dosboxConf:DOS_CONF,initFs});
+      if(result && typeof result.then === 'function'){
+        return result.then(player=>{currentPlayer=player;return player;});
+      } else {
+        currentPlayer = result; // already a player
+        return Promise.resolve(result);
+      }
     }
 
     async function filesToInitFs(fileList,mode){
@@ -157,7 +159,7 @@ BUILD
       if(rtmBuf)initFs.push({path:'RTM.EXE',contents:rtmBuf});
       if(tdBuf)initFs.push({path:'TD.EXE',contents:tdBuf});
       if(tdCfgBuf)initFs.push({path:'TDCONFIG.TD',contents:tdCfgBuf});
-      for(const f of files){if(f===asmFiles[0])continue;const dos=toDos83(f.name);const buf=new Uint8Array(await f.arrayBuffer());initFs.push({path:dos,contents:buf});}
+      for (const f of files){ if(f===asmFiles[0]) continue; const dos=toDos83(f.name); const buf=new Uint8Array(await f.arrayBuffer()); initFs.push({path:dos,contents:buf}); }
       const list=files.map(f=>`${f.name}  →  ${toDos83(f.name)}`);
       return {initFs,displayList:list};
     }
@@ -175,17 +177,18 @@ BUILD
         const {initFs,displayList}=await filesToInitFs(elInput.files,mode);
         elCtrl.classList.add('hidden');
         showFilesList(displayList);
-        elRTBar.classList.remove('hidden');
         elStat.textContent='Starting DOS...';
         await startDosWith(initFs);
         elStat.textContent=(mode==='debug')?'Debugging... (Use TD keys; Ctrl+F9 to kill DOSBox)':'Running... (Ctrl+C or Ctrl+Break to stop program; Ctrl+F9 to kill DOSBox)';
-      }catch(e){alert(e&&e.message?e.message:String(e));elStat.textContent='';updateRunState();}
+      }catch(e){
+        console.error(e);
+        elStat.textContent='';
+        updateRunState();
+      }
     }
 
     elRun.addEventListener('click',()=>runWithMode('run'));
     elDbg.addEventListener('click',()=>runWithMode('debug'));
-
-    elStop.addEventListener('click',()=>{try{if(currentPlayer&&typeof currentPlayer.exit==='function')currentPlayer.exit();}catch{}elDos.innerHTML='';elRTBar.classList.add('hidden');elFiles.classList.add('hidden');elFiles.innerHTML='';elStat.textContent='Stopped.';elCtrl.classList.remove('hidden');updateRunState();});
 
     function updateRunState(){
       const files=Array.from(elInput.files||[]);
