@@ -3,91 +3,270 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>8086 Assembly Runner — Minimal</title>
+  <title>DOSBox Emulator</title>
 
-  <!-- js-dos v8 CDN -->
-  <link rel="stylesheet" href="https://v8.js-dos.com/latest/js-dos.css">
-  <script src="https://v8.js-dos.com/latest/js-dos.js"></script>
+  <!-- Local js-dos UMD build (global window.Dos) -->
+  <link rel="stylesheet" href="js-dos.css" />
+  <script src="js-dos.js"></script>
 
   <style>
-    :root { --w: 800px; --h: 600px; }
+    :root {
+      /* Adjust these if you want a different frame size */
+      --w: 1050px;
+      --h: 600px;
+
+      /* Theme */
+      --bg1: #0f172a;
+      --bg2: #111827;
+      --card-bg: #0b1220;
+      --text: #e5e7eb;
+      --muted: #a3aed0;
+      --accent: #86efac;
+      --accent2:#22c55e;
+      --border: rgba(255,255,255,0.08);
+      --ring:   rgba(34,197,94,0.25);
+    }
     * { box-sizing: border-box; }
-    body { font-family: system-ui, Arial, sans-serif; margin: 0; min-height: 100dvh; display: grid; place-items: center; background: #f7f7f9; }
-    .wrap { width: 100%; max-width: calc(var(--w) + 32px); padding: 16px; }
-    .center { display: grid; justify-items: center; gap: 12px; }
-    #dosbox { width: var(--w); height: var(--h); border: 1px solid #ddd; background: #000; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,.08); }
-    .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    input[type="file"]{ padding: 8px; background: #fff; border: 1px solid #ddd; border-radius: 8px; }
-    button { padding: 10px 16px; border: 1px solid #ddd; border-radius: 8px; background: #fff; cursor: pointer; font-size: 15px; transition: background .15s, transform .02s; }
-    button:active{ transform: translateY(1px); }
-    button:disabled{ opacity:.45; cursor:not-allowed; background:#fff; color:#000; }
-    .ready { background: #28a745; color: #fff; border-color: #28a745; }
-    .status { min-height: 18px; font-size: 12px; color:#666; }
-    .hidden { display:none !important; }
-    ul.files { list-style: none; padding: 0; margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-    ul.files li { padding: 2px 0; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(1200px 700px at 50% -10%, #1f2937 0%, var(--bg1) 45%, var(--bg2) 100%);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+
+    .shell {
+      width: 100%;
+      /* Card width = frame width + horizontal paddings + border breathing space */
+      max-width: calc(var(--w) + 64px);
+      padding: 24px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+      gap: 12px;
+    }
+    .title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      letter-spacing: .2px;
+    }
+    .logo-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      box-shadow: 0 0 12px var(--ring), 0 0 2px var(--accent2);
+    }
+    .title h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 650;
+      color: #f8fafc;
+      text-shadow: 0 1px 0 rgba(0,0,0,.4);
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.00));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,0.03) inset,
+        0 10px 30px rgba(0,0,0,0.25),
+        0 0 0 1px rgba(255,255,255,0.02);
+      /* Key: width is larger than frame, and we center inner content */
+      width: calc(var(--w) + 32px);
+      padding: 16px;
+      display: grid;
+      justify-items: center; /* centers the DOS frame horizontally */
+      gap: 14px;
+      margin: 0 auto;
+    }
+
+    /* DOS frame */
+    #dosbox {
+      width: var(--w);
+      height: var(--h);            border: 1px solid var(--border);
+      background: #000;
+      box-shadow:
+        0 0 0 1px rgba(255,255,255,0.03) inset,
+        0 0 0 2px rgba(134,239,172,0.06),
+        0 20px 50px rgba(0,0,0,.45);
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      width: 100%;
+      justify-content: center;
+    }
+    /* Pretty file input */
+    .file {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      color: #e5e7eb;
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 1px 0 rgba(255,255,255,0.03) inset;
+      transition: transform .02s ease, box-shadow .2s ease, border-color .2s ease;
+    }
+    .file:hover {
+      border-color: rgba(134,239,172,0.35);
+      box-shadow: 0 0 0 4px var(--ring);
+    }
+    .file input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+    }
+    .file .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: #cbd5e1;
+    }
+    .file .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent2);
+      box-shadow: 0 0 10px var(--ring);
+    }
+
+    /* Action button (Reset) */
+    .btn {
+      padding: 10px 14px;
+      border-radius: 10px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      border: 1px solid var(--border);
+      color: #e5e7eb;
+      cursor: pointer;
+    }
+    .btn:hover {
+      border-color: rgba(134,239,172,0.35);
+      box-shadow: 0 0 0 4px var(--ring);
+    }
+
+    /* Uploaded files list */
+    ul.files {
+      list-style: none;
+      padding: 0;
+      margin: 4px 0 0;
+      width: 100%;
+      max-width: var(--w);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: #cbd5e1;
+    }
+    ul.files li {
+      padding: 4px 0;
+      border-bottom: 1px dashed rgba(255,255,255,0.06);
+    }
+    .hidden { display: none !important; }
+
+    .brandline {
+      height: 1px;
+      width: 100%;
+      background: linear-gradient(90deg, transparent, rgba(134,239,172,0.65), transparent);
+      margin-top: 8px;
+      opacity: .7;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="center">
-      <div id="dosbox" aria-label="DOSBox"></div>
-      <div class="bar" id="controls">
-        <input id="fileInput" type="file" multiple aria-label="Select one .asm file and any asset files" />
-        <button id="runBtn" title="Select exactly one .asm file to enable Run" disabled>Run</button>
-        <button id="dbgBtn" title="Debug with TD (Turbo Debugger)" disabled>Debug</button>
+  <div class="shell">
+    <header class="header">
+      <div class="title">
+        <span class="logo-dot" aria-hidden="true"></span>
+        <h1>DOSBox Emulator</h1>
       </div>
-      <div class="status" id="status" aria-live="polite"></div>
+      <button id="resetBtn" class="btn" title="Reset and choose new files">Reset</button>
+    </header>
+
+    <section class="card">
+      <div id="dosbox" aria-label="DOSBox frame"></div>
+
+      <div class="controls" id="controls">
+        <label class="file">
+          <span class="badge"><span class="dot"></span>Select files to run</span>
+          <!-- Allow ANY file types; we'll validate in JS -->
+          <input id="fileInput" type="file" multiple />
+        </label>
+      </div>
+
       <ul id="fileList" class="files hidden" aria-label="Uploaded files"></ul>
-    </div>
+    </section>
+
+    <div class="brandline"></div>
   </div>
 
   <script>
-  if (!window.__asmRunnerMinimal__) {
-    window.__asmRunnerMinimal__ = true;
+    (function () {
+      const DosGlobal = window.Dos;
+      if (!DosGlobal) {
+        alert("js-dos.js not found/loaded. Make sure js-dos.js is next to this HTML.");
+        return;
+      }
 
-    const elDos    = document.getElementById('dosbox');
-    const elRun    = document.getElementById('runBtn');
-    const elDbg    = document.getElementById('dbgBtn');
-    const elInput  = document.getElementById('fileInput');
-    const elStat   = document.getElementById('status');
-    const elFiles  = document.getElementById('fileList');
-    const elCtrl   = document.getElementById('controls');
+      const elDos    = document.getElementById('dosbox');
+      const elInput  = document.getElementById('fileInput');
+      const elFiles  = document.getElementById('fileList');
+      const elCtrl   = document.getElementById('controls');
+      const elReset  = document.getElementById('resetBtn');
 
-    const encoder = new TextEncoder();
+      const encoder = new TextEncoder();
+      let currentPlayer = null;
 
-    let currentPlayer = null;
+      // ---------- Helpers ----------
+      function toDos83(name) {
+        const idx = name.lastIndexOf('.');
+        let base = (idx >= 0 ? name.slice(0, idx) : name).toUpperCase();
+        let ext  = (idx >= 0 ? name.slice(idx + 1) : '').toUpperCase();
+        const clean = s => s.replace(/[^A-Z0-9]/g, '_');
+        base = clean(base).slice(0, 8);
+        ext  = clean(ext).slice(0, 3);
+        return ext ? `${base}.${ext}` : base;
+      }
+      function isAsm(name){
+        if (!name) return false;
+        let n = String(name).toLowerCase();
+        n = n.trim().replace(/[\.]+$/,'');
+        return n.endsWith('.asm');
+      }
 
-    function toDos83(name) {
-      const idx = name.lastIndexOf('.');
-      let base = (idx >= 0 ? name.slice(0, idx) : name).toUpperCase();
-      let ext  = (idx >= 0 ? name.slice(idx + 1) : '').toUpperCase();
-      const clean = s => s.replace(/[^A-Z0-9]/g, '_');
-      base = clean(base).slice(0, 8);
-      ext  = clean(ext).slice(0, 3);
-      return ext ? `${base}.${ext}` : base;
-    }
+      // ---------- Tool buffers (optional pieces auto-included if present) ----------
+      let tasmBuf=null, tlinkBuf=null, dpmiBuf=null, rtmBuf=null, tdBuf=null, tdCfgBuf=null;
+      async function preloadTools(){
+        const get = async (path, opt=false) => {
+          const r = await fetch(path);
+          if (!r.ok) { if (opt) return null; throw new Error(path + ' not found'); }
+          return new Uint8Array(await r.arrayBuffer());
+        };
+        [tasmBuf, tlinkBuf, dpmiBuf, rtmBuf, tdBuf, tdCfgBuf] = await Promise.all([
+          get('tools/TASM.EXE'),
+          get('tools/TLINK.EXE'),
+          get('tools/DPMI16BI.OVL', true),
+          get('tools/RTM.EXE',     true),
+          get('tools/TD.EXE',      true),
+          get('tools/TDCONFIG.TD', true)
+        ]);
+      }
 
-    function isAsm(name){
-      if (!name) return false;
-      const n = String(name).trim().toLowerCase();
-      return n.endsWith('.asm');
-    }
-
-    let tasmBuf=null,tlinkBuf=null,dpmiBuf=null,rtmBuf=null,tdBuf=null,tdCfgBuf=null;
-    async function preloadTools(){
-      const get=async(path,opt=false)=>{const r=await fetch(path);if(!r.ok){if(opt)return null;throw new Error(path+' not found');}return new Uint8Array(await r.arrayBuffer());};
-      [tasmBuf,tlinkBuf,dpmiBuf,rtmBuf,tdBuf,tdCfgBuf]=await Promise.all([
-        get('tools/TASM.EXE'),
-        get('tools/TLINK.EXE'),
-        get('tools/DPMI16BI.OVL',true),
-        get('tools/RTM.EXE',true),
-        get('tools/TD.EXE',true),
-        get('tools/TDCONFIG.TD',true)
-      ]);
-    }
-
-    const DOS_CONF=`
+      // ---------- DOS config (auto-runs BUILD.BAT, clears banner) ----------
+      const DOS_CONF = `
 [sdl]
 fullscreen=false
 
@@ -95,115 +274,119 @@ fullscreen=false
 @echo off
 mount c .
 c:
-echo js-dos (TASM/TLINK) ready
+cls
 BUILD
 `;
 
-    function buildBatFor(dosAsmName, mode){
-      const base=dosAsmName.replace(/\.[^.]*$/,'');
-      const lines=[];
-      lines.push('@echo off');
-      lines.push('echo Assembling '+dosAsmName+' (TASM)...');
-      lines.push('TASM /q '+dosAsmName+' > BUILD.LOG');
-      lines.push('if errorlevel 1 goto ERR');
-      lines.push('echo Linking '+base+'.OBJ (TLINK)...');
-      lines.push('TLINK '+base+'.OBJ,,NUL,; >> BUILD.LOG');
-      lines.push('if errorlevel 1 goto ERR');
-      if(mode==='debug'){
-        lines.push('echo Launching Turbo Debugger for '+base+'.EXE...');
-        lines.push('if exist TD.EXE TD '+base+'.EXE');
-        lines.push('if not exist TD.EXE '+base+'.EXE');
-      }else{
-        lines.push('echo Running '+base+'.EXE...');
-        lines.push(base+'.EXE');
+      function buildBatFor(dosAsmName){
+        const base = dosAsmName.replace(/\.[^.]*$/, '');
+        const lines = [];
+        lines.push('@echo off');
+        lines.push('TASM /zi /q ' + dosAsmName + ' > BUILD.LOG');
+        lines.push('if errorlevel 1 goto ERR');
+        lines.push('TLINK /v ' + base + '.OBJ,,NUL,; >> BUILD.LOG');
+        lines.push('if errorlevel 1 goto ERR');
+        lines.push(base + '.EXE');
+        lines.push('echo.');
+        lines.push('goto END');
+        lines.push(':ERR');
+        lines.push('type BUILD.LOG');
+        lines.push(':END');
+        const bat = lines.join("\r\n") + "\r\n";
+        return encoder.encode(bat);
       }
-      lines.push('goto END');
-      lines.push(':ERR');
-      lines.push('echo.');
-      lines.push('echo ===== BUILD FAILED =====');
-      lines.push('type BUILD.LOG');
-      lines.push(':END');
-      lines.push('echo.');
-      lines.push('echo ===== DONE =====');
-      const bat=lines.join("\r\n");
-      return encoder.encode(bat);
-    }
 
-    // Support both promise and direct player returns from Dos(...)
-    function startDosWith(initFs){
-      if(currentPlayer&&typeof currentPlayer.exit==='function'){try{currentPlayer.exit();}catch{}}
-      elDos.innerHTML='';
-      const result = Dos(elDos,{wdosboxUrl:'https://v8.js-dos.com/latest/wdosbox.js',dosboxConf:DOS_CONF,initFs});
-      if(result && typeof result.then === 'function'){
-        return result.then(player=>{currentPlayer=player;return player;});
-      } else {
-        currentPlayer = result; // already a player
-        return Promise.resolve(result);
+      function startDosWith(initFs){
+        if (currentPlayer && typeof currentPlayer.exit === 'function') {
+          try { currentPlayer.exit(); } catch {}
+        }
+        elDos.innerHTML = '';
+        currentPlayer = DosGlobal(elDos, {
+          pathPrefix: "emulators/",  // load emulator core locally
+          dosboxConf: DOS_CONF,
+          initFs,
+          noCloud: true,
+          noNetworking: true,
+          kiosk: true,
+          autostart: true
+        });
       }
-    }
 
-    async function filesToInitFs(fileList,mode){
-      const files=Array.from(fileList||[]);
-      const asmFiles=files.filter(f=>isAsm(f.name));
-      if(asmFiles.length!==1){throw new Error('Select exactly ONE .asm file (other files allowed too).');}
-      const asmOriginalName=asmFiles[0].name;
-      const dosAsmName=toDos83(asmOriginalName);
-      const asmText=await asmFiles[0].text();
-      const initFs=[
-        {path:'TASM.EXE',contents:tasmBuf},
-        {path:'TLINK.EXE',contents:tlinkBuf},
-        {path:dosAsmName,contents:encoder.encode(asmText)},
-        {path:'BUILD.BAT',contents:buildBatFor(dosAsmName,mode)}
-      ];
-      if(dpmiBuf)initFs.push({path:'DPMI16BI.OVL',contents:dpmiBuf});
-      if(rtmBuf)initFs.push({path:'RTM.EXE',contents:rtmBuf});
-      if(tdBuf)initFs.push({path:'TD.EXE',contents:tdBuf});
-      if(tdCfgBuf)initFs.push({path:'TDCONFIG.TD',contents:tdCfgBuf});
-      for (const f of files){ if(f===asmFiles[0]) continue; const dos=toDos83(f.name); const buf=new Uint8Array(await f.arrayBuffer()); initFs.push({path:dos,contents:buf}); }
-      const list=files.map(f=>`${f.name}  →  ${toDos83(f.name)}`);
-      return {initFs,displayList:list};
-    }
+      async function filesToInitFs(fileList){
+        const files = Array.from(fileList || []);
+        const asmFiles = files.filter(f => isAsm(f.name));
+        if (asmFiles.length !== 1) {
+          if (asmFiles.length === 0) alert('Select at least one .asm file (you can add assets too).');
+          else alert('Select exactly ONE .asm file (you can add assets too).');
+          throw new Error('Invalid ASM selection');
+        }
 
-    function showFilesList(items){
-      elFiles.innerHTML='';
-      for(const line of items){const li=document.createElement('li');li.textContent=line;elFiles.appendChild(li);}elFiles.classList.remove('hidden');
-    }
+        const asmOriginalName = asmFiles[0].name;
+        const dosAsmName = toDos83(asmOriginalName);
+        const asmText = await asmFiles[0].text();
 
-    async function runWithMode(mode){
-      try{
-        elRun.disabled=true;elDbg.disabled=true;
-        elStat.textContent='Preparing...';
-        if(!tasmBuf||!tlinkBuf)await preloadTools();
-        const {initFs,displayList}=await filesToInitFs(elInput.files,mode);
-        elCtrl.classList.add('hidden');
-        showFilesList(displayList);
-        elStat.textContent='Starting DOS...';
-        await startDosWith(initFs);
-        elStat.textContent=(mode==='debug')?'Debugging... (Use TD keys; Ctrl+F9 to kill DOSBox)':'Running... (Ctrl+C or Ctrl+Break to stop program; Ctrl+F9 to kill DOSBox)';
-      }catch(e){
-        console.error(e);
-        elStat.textContent='';
-        updateRunState();
+        const initFs = [
+          { path: 'TASM.EXE',  contents: tasmBuf },
+          { path: 'TLINK.EXE', contents: tlinkBuf },
+          { path: dosAsmName,  contents: encoder.encode(asmText) },
+          { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) }
+        ];
+        // Optional extras (only add if present)
+        if (dpmiBuf)  initFs.push({ path: 'DPMI16BI.OVL', contents: dpmiBuf });
+        if (rtmBuf)   initFs.push({ path: 'RTM.EXE',      contents: rtmBuf  });
+        if (tdBuf)    initFs.push({ path: 'TD.EXE',       contents: tdBuf   });
+        if (tdCfgBuf) initFs.push({ path: 'TDCONFIG.TD',  contents: tdCfgBuf});
+
+        // Add all other selected files as DOS 8.3 names
+        for (const f of files) {
+          if (f === asmFiles[0]) continue;
+          const dos = toDos83(f.name);
+          const buf = new Uint8Array(await f.arrayBuffer());
+          initFs.push({ path: dos, contents: buf });
+        }
+
+        const list = files.map(f => `${f.name}  →  ${toDos83(f.name)}`);
+        return { initFs, displayList: list };
       }
-    }
 
-    elRun.addEventListener('click',()=>runWithMode('run'));
-    elDbg.addEventListener('click',()=>runWithMode('debug'));
+      function showFilesList(items){
+        elFiles.innerHTML = '';
+        for (const line of items) {
+          const li = document.createElement('li');
+          li.textContent = line;
+          elFiles.appendChild(li);
+        }
+        elFiles.classList.remove('hidden');
+      }
 
-    function updateRunState(){
-      const files=Array.from(elInput.files||[]);
-      const asmCount=files.filter(f=>isAsm(f.name)).length;
-      const ok=(asmCount===1);
-      for(const btn of[elRun,elDbg]){btn.disabled=!ok;btn.classList.toggle('ready',ok);btn.title=ok?(btn===elDbg?'Ready to Debug':'Ready to Run'):'Select exactly one .asm file to enable';}
-      if(asmCount===0){elStat.textContent='Select one .asm file (you can add assets too).';}
-      else if(asmCount===1){elStat.textContent=files.length>1?'1 ASM + '+(files.length-1)+' asset(s) selected. Click Run or Debug.':'1 ASM selected. Click Run or Debug.';}
-      else{elStat.textContent='Too many ASM files selected.';}
-    }
+      async function autoRunFromSelection(){
+        try {
+          if (!tasmBuf || !tlinkBuf) await preloadTools();
+          const { initFs, displayList } = await filesToInitFs(elInput.files);
+          elCtrl.classList.add('hidden');
+          showFilesList(displayList);
+          startDosWith(initFs);
+        } catch (e) {
+          console.error(e);
+        }
+      }
 
-    elInput.addEventListener('change',updateRunState);
-    elInput.addEventListener('input',updateRunState);
-    updateRunState();
-  }
+      // Auto-run on valid selection
+      elInput.addEventListener('change', () => {
+        const files = Array.from(elInput.files || []);
+        const asmCount = files.filter(f => isAsm(f.name)).length;
+        if (asmCount === 1) {
+          autoRunFromSelection();
+        } else if (asmCount > 1) {
+          alert('Select exactly ONE .asm file (you can add assets too).');
+        }
+      });
+
+      // Reset brings file chooser back and clears current DOSBox
+      elReset.addEventListener('click', () => {
+        location.reload();
+      });
+    })();
   </script>
 </body>
 </html>
