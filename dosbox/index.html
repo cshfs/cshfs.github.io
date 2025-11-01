@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DOSBox Emulator</title>
 
-  <!-- Minimal white UI -->
   <link rel="stylesheet" href="js-dos.css" />
   <style>
     :root { color-scheme: light; }
@@ -32,19 +31,18 @@
     .hidden { display: none !important; }
   </style>
 
-  <!-- Register the COI service worker before loading js-dos -->
+  <!-- Register COI SW early -->
   <script>
   (function registerCOI() {
     if (!('serviceWorker' in navigator)) return;
     const swUrl = new URL('./coi-sw.js', location.href);
     navigator.serviceWorker.getRegistration('./').then((reg) => {
-      if (reg) return; // already registered for this scope
+      if (reg) return;
       navigator.serviceWorker.register(swUrl, { scope: './' }).catch(() => {});
     });
   })();
   </script>
 
-  <!-- js-dos UMD build (must be same-origin files in this folder) -->
   <script src="js-dos.js"></script>
 </head>
 <body>
@@ -78,7 +76,6 @@
     const encoder = new TextEncoder();
     let player = null;
 
-    // Wait for SW control + crossOriginIsolated on first load
     async function waitForCOIController(timeoutMs = 8000) {
       const t0 = performance.now();
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
@@ -90,7 +87,6 @@
       throw new Error('Cross-origin isolation not ready');
     }
 
-    // Helpers
     function toDos83(name) {
       const i = name.lastIndexOf('.');
       let base = (i >= 0 ? name.slice(0, i) : name).toUpperCase();
@@ -106,7 +102,7 @@
       return n.endsWith('.asm');
     }
 
-    // Preload tool binaries
+    // Preload tools
     let tasmBuf=null, tlinkBuf=null, dpmiBuf=null, rtmBuf=null, tdBuf=null, tdCfgBuf=null;
     async function preloadTools(){
       const get = async (path, opt=false) => {
@@ -124,7 +120,7 @@
       ]);
     }
 
-    // DOSBox config runs BUILD.BAT
+    // No redirection. Logs go to screen.
     const DOS_CONF = `
 [sdl]
 fullscreen=false
@@ -141,15 +137,18 @@ BUILD
       const base = dosAsmName.replace(/\.[^.]*$/, '');
       const lines = [
         '@echo off',
-        'TASM /zi /q ' + dosAsmName + ' > BUILD.LOG',
+        'echo Assembling ' + dosAsmName,
+        'TASM /zi /q ' + dosAsmName,
         'if errorlevel 1 goto ERR',
-        'TLINK /v ' + base + '.OBJ,,NUL,; >> BUILD.LOG',
+        'echo Linking ' + base + '.OBJ',
+        'TLINK /v ' + base + '.OBJ,,NUL,;',
         'if errorlevel 1 goto ERR',
+        'echo Running ' + base + '.EXE',
         base + '.EXE',
         'echo.',
         'goto END',
         ':ERR',
-        'type BUILD.LOG',
+        'echo Build failed.',
         ':END'
       ];
       return encoder.encode(lines.join("\\r\\n") + "\\r\\n");
@@ -169,8 +168,7 @@ BUILD
       });
     }
 
-    // File selection
-    const bag = new Map(); // name -> File
+    const bag = new Map();
     const countAsm = it => Array.from(it).filter(f => isAsm(f.name)).length;
 
     function refresh(){
@@ -226,7 +224,6 @@ BUILD
       return initFs;
     }
 
-    // Wire up
     elInput.addEventListener('change', () => { addFiles(elInput.files); elInput.value = ''; });
     elStart.addEventListener('click', async () => {
       try {
@@ -243,7 +240,6 @@ BUILD
     });
     elReset.addEventListener('click', () => location.reload());
 
-    // Boot
     let ready = false;
     (async () => {
       try {
