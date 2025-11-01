@@ -31,7 +31,7 @@
     .hidden { display: none !important; }
   </style>
 
-  <!-- Register COI SW early -->
+  <!-- Register the COI service worker early (file must be /dosbox/coi-sw.js) -->
   <script>
   (function registerCOI() {
     if (!('serviceWorker' in navigator)) return;
@@ -75,7 +75,9 @@
 
     const encoder = new TextEncoder();
     let player = null;
+    let ready = false;
 
+    // Wait for SW control + crossOriginIsolated on first load
     async function waitForCOIController(timeoutMs = 8000) {
       const t0 = performance.now();
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
@@ -87,6 +89,7 @@
       throw new Error('Cross-origin isolation not ready');
     }
 
+    // Helpers
     function toDos83(name) {
       const i = name.lastIndexOf('.');
       let base = (i >= 0 ? name.slice(0, i) : name).toUpperCase();
@@ -133,6 +136,7 @@ cls
 BUILD
 `;
 
+    // IMPORTANT: real CRLFs. No "\r\n" string literals visible in DOS.
     function buildBatFor(dosAsmName){
       const base = dosAsmName.replace(/\.[^.]*$/, '');
       const lines = [
@@ -151,7 +155,7 @@ BUILD
         'echo Build failed.',
         ':END'
       ];
-      return encoder.encode(lines.join("\\r\\n") + "\\r\\n");
+      return encoder.encode(lines.join("\r\n") + "\r\n");
     }
 
     function startDosWith(initFs){
@@ -168,7 +172,8 @@ BUILD
       });
     }
 
-    const bag = new Map();
+    // File selection
+    const bag = new Map(); // name -> File
     const countAsm = it => Array.from(it).filter(f => isAsm(f.name)).length;
 
     function refresh(){
@@ -224,6 +229,7 @@ BUILD
       return initFs;
     }
 
+    // Wire up
     elInput.addEventListener('change', () => { addFiles(elInput.files); elInput.value = ''; });
     elStart.addEventListener('click', async () => {
       try {
@@ -240,7 +246,7 @@ BUILD
     });
     elReset.addEventListener('click', () => location.reload());
 
-    let ready = false;
+    // Boot
     (async () => {
       try {
         elStatus.textContent = 'Waiting for site control…';
