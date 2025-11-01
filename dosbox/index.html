@@ -28,10 +28,12 @@
     label.file input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; }
     ul { margin: 8px 0 0 0; padding-left: 18px; }
     #status { font-size: 13px; color: #374151; }
+    #progWrap { display:flex; align-items:center; gap:8px; margin:6px 0; }
+    progress { width: 260px; height: 14px; }
     .hidden { display: none !important; }
   </style>
 
-  <!-- Register the COI service worker early (file must be /dosbox/coi-sw.js) -->
+  <!-- Register COI + cache SW early -->
   <script>
   (function registerCOI() {
     if (!('serviceWorker' in navigator)) return;
@@ -50,6 +52,10 @@
     <h1>DOSBox Emulator</h1>
 
     <div id="status">Enabling required features…</div>
+    <div id="progWrap" class="hidden">
+      <progress id="prog" max="100" value="0"></progress>
+      <span id="progText"></span>
+    </div>
 
     <div class="row" id="controls" aria-label="Controls">
       <label class="file" aria-label="Choose files">
@@ -72,12 +78,14 @@
     const elStart = document.getElementById('startBtn');
     const elReset = document.getElementById('resetBtn');
     const elStatus= document.getElementById('status');
+    const elProgWrap = document.getElementById('progWrap');
+    const elProg = document.getElementById('prog');
+    const elProgText = document.getElementById('progText');
 
     const encoder = new TextEncoder();
     let player = null;
     let ready = false;
 
-    // Wait for SW control + crossOriginIsolated on first load
     async function waitForCOIController(timeoutMs = 8000) {
       const t0 = performance.now();
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
@@ -89,7 +97,57 @@
       throw new Error('Cross-origin isolation not ready');
     }
 
-    // Helpers
+    // ---------- Prefetch with progress into Cache Storage ----------
+    const CACHE_NAME = 'dosbox-prewarm-v1';
+    async function prewarmWithProgress(url, {label}) {
+      elProgWrap.classList.remove('hidden');
+      elProg.value = 0;
+      elProg.removeAttribute('max'); // indeterminate until we know size
+      elProgText.textContent = `Downloading ${label}…`;
+
+      const req = new Request(url, { cache: 'reload' });
+      const resp = await fetch(req);
+      if (!resp.ok) throw new Error(`Fetch failed: ${url}`);
+
+      const len = Number(resp.headers.get('Content-Length')) || 0;
+      let loaded = 0;
+
+      // If we have a stream and a length, show percent while tee-ing to cache.
+      if (resp.body) {
+        const [forProgress, forCache] = resp.body.tee();
+        const cacheResp = new Response(forCache, {
+          status: resp.status, statusText: resp.statusText, headers: resp.headers
+        });
+
+        const cache = await caches.open(CACHE_NAME);
+        // Cache write starts immediately; we await it after progress loop.
+        const cachePutPromise = cache.put(req, cacheResp);
+
+        const reader = forProgress.getReader();
+        if (len > 0) { elProg.max = 100; }
+        for (;;) {
+          const {done, value} = await reader.read();
+          if (done) break;
+          loaded += value.byteLength;
+          if (len > 0) {
+            const pct = Math.min(100, Math.floor((loaded / len) * 100));
+            elProg.value = pct;
+            elProgText.textContent = `Downloading ${label}… ${pct}%`;
+          }
+        }
+        await cachePutPromise;
+      } else {
+        // No stream. Just put the whole response to cache and skip progress.
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(req, resp.clone());
+      }
+
+      elProg.value = 100;
+      elProg.max = 100;
+      elProgText.textContent = `${label} ready`;
+    }
+
+    // ---------- Helpers ----------
     function toDos83(name) {
       const i = name.lastIndexOf('.');
       let base = (i >= 0 ? name.slice(0, i) : name).toUpperCase();
@@ -105,7 +163,7 @@
       return n.endsWith('.asm');
     }
 
-    // Preload tools
+    // ---------- Preload tools ----------
     let tasmBuf=null, tlinkBuf=null, dpmiBuf=null, rtmBuf=null, tdBuf=null, tdCfgBuf=null;
     async function preloadTools(){
       const get = async (path, opt=false) => {
@@ -123,7 +181,7 @@
       ]);
     }
 
-    // No redirection. Logs go to screen.
+    // ---------- DOS config ----------
     const DOS_CONF = `
 [sdl]
 fullscreen=false
@@ -136,7 +194,6 @@ cls
 BUILD
 `;
 
-    // IMPORTANT: real CRLFs. No "\r\n" string literals visible in DOS.
     function buildBatFor(dosAsmName){
       const base = dosAsmName.replace(/\.[^.]*$/, '');
       const lines = [
@@ -172,8 +229,8 @@ BUILD
       });
     }
 
-    // File selection
-    const bag = new Map(); // name -> File
+    // ---------- File selection ----------
+    const bag = new Map();
     const countAsm = it => Array.from(it).filter(f => isAsm(f.name)).length;
 
     function refresh(){
@@ -229,7 +286,7 @@ BUILD
       return initFs;
     }
 
-    // Wire up
+    // ---------- Wire up ----------
     elInput.addEventListener('change', () => { addFiles(elInput.files); elInput.value = ''; });
     elStart.addEventListener('click', async () => {
       try {
@@ -246,13 +303,23 @@ BUILD
     });
     elReset.addEventListener('click', () => location.reload());
 
-    // Boot
+    // ---------- Boot ----------
     (async () => {
       try {
         elStatus.textContent = 'Waiting for site control…';
         await waitForCOIController();
+
+        // Start prefetch of the heavy emulator files with a visible progress bar.
+        elStatus.textContent = 'Downloading emulator…';
+        await prewarmWithProgress('emulators/wdosbox.wasm', { label: 'emulator (WASM)' });
+        // Optional: also warm the JS wrapper. Quick, usually small.
+        caches.open(CACHE_NAME).then(async (c) => {
+          try { await c.add('emulators/wdosbox.js'); } catch {}
+        });
+
         elStatus.textContent = 'Preloading tools…';
         await preloadTools();
+
         ready = true;
         elStatus.textContent = 'Ready. Add exactly one .asm and click Start.';
         refresh();
