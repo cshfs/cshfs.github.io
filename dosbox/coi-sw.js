@@ -4,10 +4,10 @@
 const COOP = 'same-origin';
 const COEP = 'require-corp';
 
-// Bump this when assets change, to bust cache:
+// Bump this when assets change to bust cache:
 const CACHE_NAME = 'dosbox-prewarm-v4';
 
-// Files to precache at install (add/remove as needed)
+// Files to precache at install
 const PRECACHE = [
   // Emulator
   'emulators/wdosbox.wasm',
@@ -21,7 +21,7 @@ const PRECACHE = [
   'tools/TD.EXE',
   'tools/TDCONFIG.TD',
 
-  // Optional Brotli versions (create with your script; SW will use them if present)
+  // Optional Brotli siblings (if you generated them)
   // 'emulators/wdosbox.wasm.br',
   // 'emulators/wdosbox.js.br',
   // 'tools/TASM.EXE.br',
@@ -48,7 +48,7 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
-// Map normal assets to their .br sibling (if available)
+// Prefer .br when available in cache
 const BR_MAP = {
   'emulators/wdosbox.wasm': 'emulators/wdosbox.wasm.br',
   'emulators/wdosbox.js':   'emulators/wdosbox.js.br',
@@ -70,7 +70,6 @@ async function matchBest(cache, req) {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\//, '');
 
-  // Prefer cached .br if present
   const br = BR_MAP[path];
   if (br) {
     const brURL = new URL(url.origin + '/' + br);
@@ -86,7 +85,6 @@ async function matchBest(cache, req) {
     }
   }
 
-  // Fallback to normal cached response
   const hit = await cache.match(req);
   if (hit) {
     const headers = new Headers(hit.headers);
@@ -98,12 +96,12 @@ async function matchBest(cache, req) {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin) return; // only same-origin
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
 
-    // 1) Cache first, prefer .br if available
+    // 1) Cache first (prefer .br)
     const cached = await matchBest(cache, event.request);
     if (cached) return cached;
 
