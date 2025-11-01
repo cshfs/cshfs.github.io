@@ -10,32 +10,24 @@
     :root { color-scheme: light; }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body {
-      margin: 0; background: #fff; color: #111;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      display: grid; place-items: start center;
-    }
+    body { margin: 0; background: #fff; color: #111; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; display: grid; place-items: start center; }
     main { width: 100%; max-width: 960px; padding: 16px; }
     h1 { margin: 0 0 12px 0; font-size: 20px; font-weight: 600; }
 
     /* Loading screen */
-    #loading { margin: 8px 0 12px 0; }
-    #status { font-size: 13px; color: #374151; margin-bottom:6px; }
-    #progWrap { display:flex; align-items:center; gap:8px; margin:6px 0; }
+    #loading { margin: 8px 0 12px; }
+    #status { font-size: 13px; color: #374151; margin-bottom: 6px; }
+    #progWrap { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
     progress { width: 260px; height: 14px; }
 
     /* App UI (hidden until ready) */
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
     #dosbox { width: 100%; max-width: 896px; aspect-ratio: 1050 / 600; border: 1px solid #e5e7eb; background: #000; }
-    button, label.file {
-      font: inherit; font-size: 14px; padding: 10px 14px; border-radius: 8px;
-      border: 1px solid #e5e7eb; background: #f8fafc; color: #111; cursor: pointer;
-    }
+    button, label.file { font: inherit; font-size: 14px; padding: 10px 14px; border-radius: 8px; border: 1px solid #e5e7eb; background: #f8fafc; color: #111; cursor: pointer; }
     button[disabled] { opacity: .6; cursor: not-allowed; }
     label.file { position: relative; }
-    label.file input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; }
+    label.file input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
     ul { margin: 8px 0 0 0; padding-left: 18px; }
-
     .hidden { display: none !important; }
   </style>
 
@@ -50,9 +42,7 @@
         try { await navigator.serviceWorker.ready; sessionStorage.setItem(KEY, '1'); location.reload(); } catch {}
       }
     });
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      sessionStorage.removeItem(KEY);
-    });
+    navigator.serviceWorker.addEventListener('controllerchange', () => { sessionStorage.removeItem(KEY); });
   })();
   </script>
 
@@ -65,10 +55,8 @@
     <!-- Loading screen -->
     <section id="loading">
       <div id="status">Enabling required features…</div>
-
-      <!-- WASM and tools will reuse this bar -->
       <div id="progWrap" class="hidden">
-        <progress id="prog" max="100" value="0"></progress>
+        <progress id="prog" value="0"></progress>
         <span id="progText"></span>
       </div>
     </section>
@@ -76,13 +64,10 @@
     <!-- App UI (hidden until ready) -->
     <section id="app" class="hidden" aria-hidden="true">
       <div class="row" id="controls">
-        <label class="file">
-          Choose files<input id="fileInput" type="file" multiple />
-        </label>
+        <label class="file">Choose files<input id="fileInput" type="file" multiple /></label>
         <button id="startBtn" disabled>Start</button>
         <button id="resetBtn">Reset</button>
       </div>
-
       <div id="dosbox"></div>
       <ul id="fileList" class="hidden"></ul>
     </section>
@@ -109,6 +94,7 @@
     let player = null;
     let ready = false;
 
+    // Gate: SW control + COI
     async function waitForCOIController(timeoutMs = 8000) {
       const t0 = performance.now();
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
@@ -120,36 +106,44 @@
       throw new Error('Cross-origin isolation not ready');
     }
 
-    // Cache name
+    // Cache
     const CACHE_NAME = 'dosbox-prewarm-v1';
 
-    // Download with visible progress
-    async function fetchWithProgress(url, label) {
+    // Stream a URL into Cache and memory with byte progress
+    async function streamToMemoryAndCache(url, label) {
       elProgWrap.classList.remove('hidden');
-      elProg.value = 0;
-      elProg.removeAttribute('max');
+      elProg.value = 0; elProg.removeAttribute('max');
       elProgText.textContent = `Downloading ${label}…`;
 
       const req = new Request(url, { cache: 'reload' });
       const resp = await fetch(req);
       if (!resp.ok) throw new Error(`Fetch failed: ${url}`);
-
       const len = Number(resp.headers.get('Content-Length')) || 0;
-      let loaded = 0;
 
       const cache = await caches.open(CACHE_NAME);
-
+      const [forProgress, forCache, forMemory] = (resp.body ? resp.body.tee().concat([]) : []); // placeholder
+      // body.tee() returns 2 streams; we need 2 tees total to get 3. Do it in steps:
+      let s1, s2, s3;
       if (resp.body) {
-        const [forProgress, forCache] = resp.body.tee();
-        const cacheResp = new Response(forCache, { status: resp.status, statusText: resp.statusText, headers: resp.headers });
-        const putP = cache.put(req, cacheResp);
+        const [a, b] = resp.body.tee();
+        const [b1, b2] = b.tee();
+        s1 = a; s2 = b1; s3 = b2;
+      }
 
-        const reader = forProgress.getReader();
+      // Cache write
+      const cacheResp = new Response(s2 || resp.body, { status: resp.status, statusText: resp.statusText, headers: resp.headers });
+      const putP = cache.put(req, cacheResp);
+
+      // Progress + memory buffer
+      let loaded = 0;
+      const chunks = [];
+      if (s1) {
         if (len > 0) elProg.max = 100;
-
+        const reader = s1.getReader();
         for (;;) {
           const {done, value} = await reader.read();
           if (done) break;
+          chunks.push(value);
           loaded += value.byteLength;
           if (len > 0) {
             const pct = Math.min(100, Math.floor((loaded / len) * 100));
@@ -157,37 +151,106 @@
             elProgText.textContent = `Downloading ${label}… ${pct}%`;
           }
         }
-        await putP;
       } else {
-        await cache.put(req, resp.clone());
+        // no stream
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        chunks.push(buf);
       }
 
-      elProg.value = 100;
-      elProg.max = 100;
+      await putP;
+
+      // Concatenate chunks
+      let total = 0; for (const c of chunks) total += c.byteLength;
+      const out = new Uint8Array(total);
+      let off = 0; for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+
+      elProg.value = 100; elProg.max = 100;
       elProgText.textContent = `${label} ready`;
+      return out;
     }
 
-    // Simple tool preload with pseudo-progress
-    async function preloadToolsWithProgress() {
-      const toolList = [
-        'tools/TASM.EXE',
-        'tools/TLINK.EXE',
-        'tools/DPMI16BI.OVL',
-        'tools/RTM.EXE',
-        'tools/TD.EXE',
-        'tools/TDCONFIG.TD'
-      ];
-      let done = 0;
-      elProgWrap.classList.remove('hidden');
-      elProg.max = toolList.length;
+    // Combined byte-progress for multiple files
+    async function downloadToolsWithByteProgress(list) {
+      // First try cache quick path
+      const cache = await caches.open(CACHE_NAME);
+      const result = new Map();
+      let totalKnown = 0, knownCount = 0;
 
-      for (const t of toolList) {
-        elProgText.textContent = `Loading tools (${done}/${toolList.length})`;
-        try { await fetch(t); } catch {}
-        done++;
-        elProg.value = done;
+      // Probe sizes
+      const sizes = await Promise.all(list.map(async f => {
+        const cached = await cache.match(f.url);
+        if (cached) {
+          const buf = new Uint8Array(await cached.clone().arrayBuffer());
+          result.set(f.path, buf);
+          return {url:f.url, size: buf.byteLength, cached:true};
+        }
+        try {
+          const head = await fetch(f.url, { method:'HEAD', cache:'reload' });
+          const n = Number(head.headers.get('Content-Length')) || 0;
+          if (n > 0) { totalKnown += n; knownCount++; }
+          return {url:f.url, size:n, cached:false};
+        } catch { return {url:f.url, size:0, cached:false}; }
+      }));
+
+      // Download any missing with visible aggregate progress
+      let loaded = 0;
+      elProgWrap.classList.remove('hidden');
+      if (totalKnown > 0) { elProg.max = 100; elProg.value = 0; }
+      elProgText.textContent = 'Loading tools…';
+
+      for (const f of list) {
+        if (result.has(f.path)) continue;
+
+        const req = new Request(f.url, { cache: 'reload' });
+        const resp = await fetch(req);
+        if (!resp.ok) { if (f.required) throw new Error('Missing required tool: ' + f.path); else continue; }
+
+        const len = Number(resp.headers.get('Content-Length')) || 0;
+        const [forProgress, forCache] = resp.body ? resp.body.tee() : [null, null];
+
+        // Cache
+        if (forCache) {
+          const cacheResp = new Response(forCache, { status: resp.status, statusText: resp.statusText, headers: resp.headers });
+          cache.put(req, cacheResp).catch(() => {});
+        }
+
+        // Progress + memory
+        let fileLoaded = 0;
+        const chunks = [];
+        if (forProgress) {
+          const reader = forProgress.getReader();
+          for (;;) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            fileLoaded += value.byteLength;
+            if (totalKnown > 0 && len > 0) {
+              loaded += value.byteLength;
+              const pct = Math.min(100, Math.floor((loaded / totalKnown) * 100));
+              elProg.value = pct;
+              elProgText.textContent = `Loading tools… ${pct}%`;
+            }
+          }
+        } else {
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          chunks.push(buf);
+          if (totalKnown > 0) {
+            loaded += buf.byteLength;
+            const pct = Math.min(100, Math.floor((loaded / totalKnown) * 100));
+            elProg.value = pct;
+            elProgText.textContent = `Loading tools… ${pct}%`;
+          }
+        }
+        // concat
+        let total = 0; for (const c of chunks) total += c.byteLength;
+        const out = new Uint8Array(total);
+        let off = 0; for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+        result.set(f.path, out);
       }
-      elProgText.textContent = `Tools ready`;
+
+      elProg.value = 100; elProg.max = 100;
+      elProgText.textContent = 'Tools ready';
+      return result;
     }
 
     // DOS config
@@ -240,85 +303,85 @@ BUILD
 
     // File selection
     const bag = new Map();
-    const countAsm = it => Array.from(it).filter(f => isAsm(f.name)).length;
-
-    function toDos83(name) {
-      const i = name.lastIndexOf('.');
-      let base = (i >= 0 ? name.slice(0, i) : name).toUpperCase();
-      let ext  = (i >= 0 ? name.slice(i + 1) : '').toUpperCase();
-      const clean = s => s.replace(/[^A-Z0-9]/g, '_');
-      base = clean(base).slice(0, 8);
-      ext  = clean(ext).slice(0, 3);
-      return ext ? `${base}.${ext}` : base;
-    }
-    function isAsm(name){
-      if (!name) return false;
-      const n = String(name).toLowerCase().trim().replace(/[\.]+$/,'');
-      return n.endsWith('.asm');
-    }
+    const countAsm = it => Array.from(it).filter(f => /\.asm$/i.test(f.name)).length;
+    const toDos83 = (name) => {
+      const i = name.lastIndexOf('.'); let b=(i>=0?name.slice(0,i):name).toUpperCase(); let e=(i>=0?name.slice(i+1):'').toUpperCase();
+      const clean=s=>s.replace(/[^A-Z0-9]/g,'_'); b=clean(b).slice(0,8); e=clean(e).slice(0,3); return e?`${b}.${e}`:b;
+    };
 
     function refresh(){
       const files = Array.from(bag.values());
       elList.innerHTML = '';
-      for (const f of files) {
-        const li = document.createElement('li');
-        li.textContent = `${f.name} → ${toDos83(f.name)}`;
-        elList.appendChild(li);
-      }
+      for (const f of files) { const li = document.createElement('li'); li.textContent = `${f.name} → ${toDos83(f.name)}`; elList.appendChild(li); }
       if (files.length) elList.classList.remove('hidden');
       elStart.disabled = !(ready && countAsm(files) === 1);
     }
-
     function addFiles(list){
       const incoming = Array.from(list || []);
       const existingAsm = countAsm(bag.values());
-      let toAddAsm = 0;
-      for (const f of incoming) if (isAsm(f.name)) toAddAsm++;
+      let toAddAsm = 0; for (const f of incoming) if (/\.asm$/i.test(f.name)) toAddAsm++;
       if (existingAsm + toAddAsm > 1) alert('Select exactly ONE .asm file. Extra .asm files were ignored.');
-      for (const f of incoming) {
-        if (isAsm(f.name) && existingAsm >= 1) continue;
-        bag.set(f.name, f);
-      }
+      for (const f of incoming) { if (/\.asm$/i.test(f.name) && existingAsm >= 1) continue; bag.set(f.name, f); }
       refresh();
     }
 
     elInput.addEventListener('change', () => { addFiles(elInput.files); elInput.value = ''; });
+    elReset.addEventListener('click', () => location.reload());
     elStart.addEventListener('click', async () => {
       try {
         elStart.disabled = true;
         const files = Array.from(bag.values());
-        const asmFiles = files.filter(f => isAsm(f.name));
+        const asmFiles = files.filter(f => /\.asm$/i.test(f.name));
         if (asmFiles.length !== 1) return;
         const asmText = await asmFiles[0].text();
         const dosAsmName = toDos83(asmFiles[0].name);
 
+        // Use downloaded tool buffers
         const initFs = [
-          { path: 'TASM.EXE',  contents: new Uint8Array(await (await fetch('tools/TASM.EXE')).arrayBuffer()) },
-          { path: 'TLINK.EXE', contents: new Uint8Array(await (await fetch('tools/TLINK.EXE')).arrayBuffer()) },
+          { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
+          { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
           { path: dosAsmName,  contents: encoder.encode(asmText) },
           { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) }
         ];
-        startDosWith(initFs);
-      } catch (e) {
-        console.error(e);
-        alert('Error. See console.');
-        elStart.disabled = false;
-      }
-    });
-    elReset.addEventListener('click', () => location.reload());
+        // Optional overlays
+        if (toolBufs.get('DPMI16BI.OVL')) initFs.push({ path: 'DPMI16BI.OVL', contents: toolBufs.get('DPMI16BI.OVL') });
+        if (toolBufs.get('RTM.EXE'))       initFs.push({ path: 'RTM.EXE',      contents: toolBufs.get('RTM.EXE') });
+        if (toolBufs.get('TD.EXE'))        initFs.push({ path: 'TD.EXE',       contents: toolBufs.get('TD.EXE') });
+        if (toolBufs.get('TDCONFIG.TD'))   initFs.push({ path: 'TDCONFIG.TD',  contents: toolBufs.get('TDCONFIG.TD') });
 
-    // Boot sequence
+        // Extra user assets
+        for (const f of files) {
+          if (f === asmFiles[0]) continue;
+          const buf = new Uint8Array(await f.arrayBuffer());
+          initFs.push({ path: toDos83(f.name), contents: buf });
+        }
+        startDosWith(initFs);
+      } catch (e) { console.error(e); alert('Error. See console.'); elStart.disabled = false; }
+    });
+
+    // Boot
+    let toolBufs = new Map();
     (async () => {
       try {
         elStatus.textContent = 'Waiting for site control…';
         await waitForCOIController();
 
+        // Prefetch emulator WASM with byte progress
         elStatus.textContent = 'Downloading emulator…';
-        await fetchWithProgress('emulators/wdosbox.wasm', 'emulator (WASM)');
+        await streamToMemoryAndCache('emulators/wdosbox.wasm', 'emulator (WASM)');
         caches.open(CACHE_NAME).then(async (c) => { try { await c.add('emulators/wdosbox.js'); } catch {} });
 
+        // Download tools with aggregate byte progress
         elStatus.textContent = 'Loading tools…';
-        await preloadToolsWithProgress();
+        const tools = [
+          { path: 'TASM.EXE',     url: 'tools/TASM.EXE',     required: true  },
+          { path: 'TLINK.EXE',    url: 'tools/TLINK.EXE',    required: true  },
+          { path: 'DPMI16BI.OVL', url: 'tools/DPMI16BI.OVL', required: false },
+          { path: 'RTM.EXE',      url: 'tools/RTM.EXE',      required: false },
+          { path: 'TD.EXE',       url: 'tools/TD.EXE',       required: false },
+          { path: 'TDCONFIG.TD',  url: 'tools/TDCONFIG.TD',  required: false }
+        ];
+        toolBufs = await downloadToolsWithByteProgress(tools);
 
         // Ready
         ready = true;
