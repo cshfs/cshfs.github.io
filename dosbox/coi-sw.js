@@ -1,17 +1,18 @@
-// coi-sw.js — COOP/COEP + install-time precache + Brotli serving + immutable caching
-// Works on GitHub Pages (no server headers needed).
+// coi-sw.js — COOP/COEP + install-time precache + Brotli (.br) preference + immutable caching
+// Designed for GitHub Pages (no server headers needed).
 
 const COOP = 'same-origin';
 const COEP = 'require-corp';
 
-// Bump this on deploys that change assets to bust cache.
-const CACHE_NAME = 'dosbox-prewarm-v3';
+// Bump this when assets change, to bust cache:
+const CACHE_NAME = 'dosbox-prewarm-v4';
 
-// Files to precache during SW install. Include .br variants if you add them.
+// Files to precache at install (add/remove as needed)
 const PRECACHE = [
   // Emulator
   'emulators/wdosbox.wasm',
   'emulators/wdosbox.js',
+
   // Tools
   'tools/TASM.EXE',
   'tools/TLINK.EXE',
@@ -20,7 +21,7 @@ const PRECACHE = [
   'tools/TD.EXE',
   'tools/TDCONFIG.TD',
 
-  // Optional: add Brotli versions if you generate them (see instructions).
+  // Optional Brotli versions (create with your script; SW will use them if present)
   // 'emulators/wdosbox.wasm.br',
   // 'emulators/wdosbox.js.br',
   // 'tools/TASM.EXE.br',
@@ -47,7 +48,7 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
-// Map normal paths to .br if present
+// Map normal assets to their .br sibling (if available)
 const BR_MAP = {
   'emulators/wdosbox.wasm': 'emulators/wdosbox.wasm.br',
   'emulators/wdosbox.js':   'emulators/wdosbox.js.br',
@@ -68,9 +69,11 @@ function setCommonHeaders(headers) {
 async function matchBest(cache, req) {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\//, '');
-  const brPath = BR_MAP[path];
-  if (brPath) {
-    const brURL = new URL(url.origin + '/' + brPath);
+
+  // Prefer cached .br if present
+  const br = BR_MAP[path];
+  if (br) {
+    const brURL = new URL(url.origin + '/' + br);
     const brHit = await cache.match(brURL.href);
     if (brHit) {
       const headers = new Headers(brHit.headers);
@@ -82,6 +85,8 @@ async function matchBest(cache, req) {
       return new Response(brHit.body, { status: brHit.status, statusText: brHit.statusText, headers });
     }
   }
+
+  // Fallback to normal cached response
   const hit = await cache.match(req);
   if (hit) {
     const headers = new Headers(hit.headers);
@@ -93,12 +98,12 @@ async function matchBest(cache, req) {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) return; // only same-origin
 
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
 
-    // 1) Cache first (prefer .br)
+    // 1) Cache first, prefer .br if available
     const cached = await matchBest(cache, event.request);
     if (cached) return cached;
 
@@ -107,6 +112,7 @@ self.addEventListener('fetch', (event) => {
     if (resp && resp.ok && event.request.method === 'GET') {
       cache.put(event.request, resp.clone()).catch(()=>{});
     }
+
     const headers = new Headers(resp.headers);
     setCommonHeaders(headers);
     return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
