@@ -1,7 +1,5 @@
 // coi-sw.js — Service Worker to enable crossOriginIsolated on static hosting.
-//
-// Adds COOP/COEP to same-origin responses so SharedArrayBuffer and threads work.
-// First activation claims clients and reloads them once so the SW controls the page.
+// Adds COOP/COEP to same-origin responses. Reloads controlled pages once on activate.
 
 const COOP = 'same-origin';
 const COEP = 'require-corp';
@@ -17,19 +15,13 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (url.origin !== self.location.origin) return; // only same-origin
+  if (url.origin !== self.location.origin) return;
 
   event.respondWith((async () => {
-    // Use default fetch. Static hosts like GitHub Pages will serve same-origin.
     const resp = await fetch(event.request, { mode: 'same-origin', credentials: 'same-origin' });
     const headers = new Headers(resp.headers);
     headers.set('Cross-Origin-Opener-Policy', COOP);
     headers.set('Cross-Origin-Embedder-Policy', COEP);
-
-    return new Response(resp.body, {
-      status: resp.status,
-      statusText: resp.statusText,
-      headers
-    });
+    return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
   })());
 });
