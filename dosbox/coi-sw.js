@@ -5,7 +5,7 @@ const COOP = 'same-origin';
 const COEP = 'require-corp';
 
 // Bump this when assets change to bust cache:
-const CACHE_NAME = 'dosbox-prewarm-v4';
+const CACHE_NAME = 'dosbox-prewarm-v5';
 
 // Files to precache at install
 const PRECACHE = [
