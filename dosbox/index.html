@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DOSBox Emulator</title>
 
-  <!-- Prioritize the heavy emulator files -->
+  <!-- Prioritize heavy emulator assets -->
   <link rel="preload" as="fetch" href="emulators/wdosbox.wasm" type="application/wasm" crossorigin>
   <link rel="preload" as="script" href="emulators/wdosbox.js">
 
@@ -14,30 +14,35 @@
     :root { color-scheme: light; }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
-    body { margin:0; background:#fff; color:#111;
-      font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-      display:grid; place-items:start center; }
-    main { width:100%; max-width:960px; padding:16px; }
-    h1 { margin:0 0 12px 0; font-size:20px; font-weight:600; }
+    body {
+      margin: 0; background: #fff; color: #111;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      display: grid; place-items: start center;
+    }
+    main { width: 100%; max-width: 960px; padding: 16px; }
+    h1 { margin: 0 0 12px 0; font-size: 20px; font-weight: 600; }
 
     /* Loading screen */
-    #loading { margin:8px 0 12px; }
-    #status { font-size:13px; color:#374151; margin-bottom:6px; }
-    #progWrap { display:flex; align-items:center; gap:8px; margin:6px 0; }
-    progress { width:260px; height:14px; }
+    #loading { margin: 8px 0 12px; }
+    #status { font-size: 13px; color: #374151; margin-bottom: 6px; }
+    #progWrap { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+    progress { width: 260px; height: 14px; }
 
     /* App (hidden until ready) */
-    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:12px 0; }
-    #dosbox { width:100%; max-width:896px; aspect-ratio:1050/600; border:1px solid #e5e7eb; background:#000; }
-    button, label.file { font:inherit; font-size:14px; padding:10px 14px; border-radius:8px;
-      border:1px solid #e5e7eb; background:#f8fafc; color:#111; cursor:pointer; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+    #dosbox { width: 100%; max-width: 896px; aspect-ratio: 1050/600; border: 1px solid #e5e7eb; background: #000; }
+    button, label.file {
+      font: inherit; font-size: 14px; padding: 10px 14px; border-radius: 8px;
+      border: 1px solid #e5e7eb; background: #f8fafc; color: #111; cursor: pointer;
+    }
     button[disabled]{ opacity:.6; cursor:not-allowed; }
-    label.file{ position:relative; } label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
-    ul { margin:8px 0 0; padding-left:18px; }
-    .hidden { display:none !important; }
+    label.file{ position:relative; }
+    label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+    ul { margin: 8px 0 0; padding-left: 18px; }
+    .hidden { display: none !important; }
   </style>
 
-  <!-- Register SW early; page reloads once when SW is ready -->
+  <!-- Register COI SW early; page reloads once when SW is ready -->
   <script>
   (function registerCOI() {
     if (!('serviceWorker' in navigator)) return;
@@ -52,6 +57,7 @@
   })();
   </script>
 
+  <!-- js-dos (local UMD build) -->
   <script src="js-dos.js"></script>
 </head>
 <body>
@@ -97,12 +103,12 @@
     const elProgText = document.getElementById('progText');
 
     const encoder = new TextEncoder();
-    let player = null;      // js-dos player
-    let ci = null;          // command interface (set on warm boot)
+    let player = null;    // js-dos player
+    let ci = null;        // command interface after warm boot
     let ready = false;
     let toolBufs = new Map(); // filename -> Uint8Array
 
-    // ------------- COI gate -------------
+    // ---------- COI gate ----------
     async function waitForCOIController(timeoutMs=8000){
       const t0 = performance.now();
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
@@ -114,21 +120,19 @@
       throw new Error('Cross-origin isolation not ready');
     }
 
-    // ------------- Preload: single file-count bar (WASM + tools) -------------
-    const CACHE_NAME = 'dosbox-prewarm-v3';
+    // ---------- Preload (single file-count bar: WASM + all tools) ----------
+    const CACHE_NAME = 'dosbox-prewarm-v4';
 
     async function preloadAllWithFileCount(files, label){
       elProgWrap.classList.remove('hidden');
-
-      let total = files.length;
-      let done = 0;
+      let total = files.length, done = 0;
       elProg.max = total; elProg.value = 0;
       elProgText.textContent = `${label} (0/${total})`;
 
       const cache = await caches.open(CACHE_NAME);
       const mem = new Map();
 
-      // pass 1: cache hits count as done (fill memory if needed)
+      // pass 1: cache hits
       for (const f of files){
         const hit = await cache.match(f.url);
         if (hit){
@@ -140,7 +144,6 @@
           }
         }
       }
-
       // pass 2: fetch misses
       for (const f of files){
         const hit = await cache.match(f.url);
@@ -160,23 +163,20 @@
         done++;
         elProg.value = done; elProgText.textContent = `${label} (${done}/${total})`;
       }
-
-      // fill remaining in-memory from cache (when they were hits)
+      // fill in-memory from cache for earlier hits
       for (const f of files){
-        if (!f.keepInMemory) continue;
-        if (mem.has(f.path)) continue;
+        if (!f.keepInMemory || mem.has(f.path)) continue;
         const hit = await cache.match(f.url);
         if (hit){
           const buf = new Uint8Array(await hit.clone().arrayBuffer());
           mem.set(f.path, buf);
         }
       }
-
       elProg.value = total; elProgText.textContent = `${label} complete`;
       return mem;
     }
 
-    // ------------- DOS config + build -------------
+    // ---------- DOS config / warm boot ----------
     const DOS_CONF_IDLE = `
 [autoexec]
 @echo off
@@ -213,7 +213,6 @@ CALL BUILD.BAT
       return encoder.encode(lines.join("\r\n") + "\r\n");
     }
 
-    // ------------- Warm boot (start emulator before user clicks Start) -------------
     function warmBoot(){
       if (player && typeof player.exit==='function'){ try { player.exit(); } catch{} }
       elDos.innerHTML = '';
@@ -228,7 +227,7 @@ CALL BUILD.BAT
       });
     }
 
-    // ------------- File helpers -------------
+    // ---------- File helpers / UI ----------
     const toDos83 = (name)=>{
       const i = name.lastIndexOf('.');
       let b = (i>=0?name.slice(0,i):name).toUpperCase();
@@ -238,8 +237,6 @@ CALL BUILD.BAT
       return e?`${b}.${e}`:b;
     };
     const isAsm = n => /\.asm$/i.test(n);
-
-    // ------------- UI state -------------
     const bag = new Map();
     const countAsm = it => Array.from(it).filter(f => isAsm(f.name)).length;
 
@@ -263,7 +260,7 @@ CALL BUILD.BAT
       refresh();
     }
 
-    // ------------- Wire up -------------
+    // ---------- Wire up ----------
     elInput.addEventListener('change', ()=>{ addFiles(elInput.files); elInput.value=''; });
     elReset.addEventListener('click', ()=>location.reload());
     elStart.addEventListener('click', async ()=>{
@@ -275,7 +272,6 @@ CALL BUILD.BAT
 
         const asmText = await asmFiles[0].text();
         const dosAsmName = toDos83(asmFiles[0].name);
-
         if (!ci) { alert('Emulator not ready yet.'); elStart.disabled = false; return; }
 
         // Write tools into live FS (from memory buffers)
@@ -296,10 +292,9 @@ CALL BUILD.BAT
           await ci.fsWriteFile(toDos83(f.name), buf);
         }
 
-        // Write BUILD.BAT and trigger
+        // Write BUILD.BAT and trigger the waiting AUTOEXEC
         await ci.fsWriteFile('BUILD.BAT', buildBatFor(dosAsmName));
-        await ci.fsWriteFile('GO.TXT', new Uint8Array()); // wakes AUTOEXEC to CALL BUILD
-
+        await ci.fsWriteFile('GO.TXT', new Uint8Array());
       } catch(e){
         console.error(e);
         alert('Error. See console.');
@@ -307,7 +302,7 @@ CALL BUILD.BAT
       }
     });
 
-    // ------------- Boot sequence -------------
+    // ---------- Boot sequence ----------
     (async()=>{
       try{
         elStatus.textContent = 'Waiting for site control…';
@@ -326,14 +321,14 @@ CALL BUILD.BAT
         ];
         elStatus.textContent = 'Loading emulator and tools…';
         const mem = await preloadAllWithFileCount(preloadList, 'Loading emulator and tools');
-        // Store into toolBufs (strip paths to DOS names)
+        // Store to toolBufs using only DOS filenames
         toolBufs = new Map();
         for (const [k,v] of mem.entries()){
-          const name = k.split('/').pop(); // keep filename only
+          const name = k.split('/').pop();
           toolBufs.set(name, v);
         }
 
-        // Warm-boot the emulator so Start is instant
+        // Warm-boot emulator so Start is instant
         elStatus.textContent = 'Starting emulator…';
         warmBoot();
 
