@@ -5,28 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DOSBox Emulator</title>
 
-  <!-- Cross-origin isolation via SW (must be same-origin, unbundled) -->
-  <script src="coi-serviceworker.js"></script>
-
-  <!-- js-dos UMD build -->
+  <!-- Minimal white UI -->
   <link rel="stylesheet" href="js-dos.css" />
-  <script src="js-dos.js"></script>
-
   <style>
     :root { color-scheme: light; }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body {
-      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background: #fff; color: #111; display: grid; place-items: start center;
+      margin: 0; background: #fff; color: #111;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      display: grid; place-items: start center;
     }
-    .page { width: 100%; max-width: 960px; padding: 16px; }
+    main { width: 100%; max-width: 960px; padding: 16px; }
     h1 { margin: 0 0 12px 0; font-size: 20px; font-weight: 600; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
-    #dosbox {
-      width: 100%; max-width: 896px; aspect-ratio: 1050 / 600;
-      border: 1px solid #e5e7eb; background: #000;
-    }
+    #dosbox { width: 100%; max-width: 896px; aspect-ratio: 1050 / 600; border: 1px solid #e5e7eb; background: #000; }
     button, label.file {
       font: inherit; font-size: 14px; padding: 10px 14px; border-radius: 8px;
       border: 1px solid #e5e7eb; background: #f8fafc; color: #111; cursor: pointer;
@@ -38,18 +31,32 @@
     #status { font-size: 13px; color: #374151; }
     .hidden { display: none !important; }
   </style>
+
+  <!-- Register the COI service worker before loading js-dos -->
+  <script>
+  (function registerCOI() {
+    if (!('serviceWorker' in navigator)) return;
+    const swUrl = new URL('./coi-sw.js', location.href);
+    navigator.serviceWorker.getRegistration('./').then((reg) => {
+      if (reg) return; // already registered for this scope
+      navigator.serviceWorker.register(swUrl, { scope: './' }).catch(() => {});
+    });
+  })();
+  </script>
+
+  <!-- js-dos UMD build (must be same-origin files in this folder) -->
+  <script src="js-dos.js"></script>
 </head>
 <body>
-  <main class="page">
+  <main>
     <h1>DOSBox Emulator</h1>
 
-    <div id="status">Checking environment…</div>
+    <div id="status">Enabling required features…</div>
 
     <div class="row" id="controls" aria-label="Controls">
       <label class="file" aria-label="Choose files">
         Choose files<input id="fileInput" type="file" multiple />
       </label>
-
       <button id="startBtn" disabled title="Start after adding exactly one .asm">Start</button>
       <button id="resetBtn">Reset</button>
     </div>
@@ -71,29 +78,19 @@
     const encoder = new TextEncoder();
     let player = null;
 
-    // --- Requirements gating -------------------------------------------------
-    // We wait until:
-    //   1) the COI service worker controls this page
-    //   2) crossOriginIsolated === true
-    // This prevents first-load races on slow networks.
+    // Wait for SW control + crossOriginIsolated on first load
     async function waitForCOIController(timeoutMs = 8000) {
-      const start = performance.now();
-      // If already controlled and isolated, return immediately.
+      const t0 = performance.now();
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
-
-      // Poll for controller and isolation; the COI SW will auto-reload once.
-      while (performance.now() - start < timeoutMs) {
+      while (performance.now() - t0 < timeoutMs) {
         if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
         await new Promise(r => setTimeout(r, 100));
       }
-      // If we got controller but not CIO, give one programmatic reload.
-      if (navigator.serviceWorker?.controller && !self.crossOriginIsolated) {
-        location.reload();
-      }
+      if (navigator.serviceWorker?.controller && !self.crossOriginIsolated) location.reload();
       throw new Error('Cross-origin isolation not ready');
     }
 
-    // --- Helpers -------------------------------------------------------------
+    // Helpers
     function toDos83(name) {
       const i = name.lastIndexOf('.');
       let base = (i >= 0 ? name.slice(0, i) : name).toUpperCase();
@@ -109,7 +106,7 @@
       return n.endsWith('.asm');
     }
 
-    // --- Tool buffers --------------------------------------------------------
+    // Preload tool binaries
     let tasmBuf=null, tlinkBuf=null, dpmiBuf=null, rtmBuf=null, tdBuf=null, tdCfgBuf=null;
     async function preloadTools(){
       const get = async (path, opt=false) => {
@@ -127,7 +124,7 @@
       ]);
     }
 
-    // --- DOS config ----------------------------------------------------------
+    // DOSBox config runs BUILD.BAT
     const DOS_CONF = `
 [sdl]
 fullscreen=false
@@ -172,7 +169,7 @@ BUILD
       });
     }
 
-    // --- File bag ------------------------------------------------------------
+    // File selection
     const bag = new Map(); // name -> File
     const countAsm = it => Array.from(it).filter(f => isAsm(f.name)).length;
 
@@ -193,7 +190,7 @@ BUILD
       const existingAsm = countAsm(bag.values());
       let toAddAsm = 0;
       for (const f of incoming) if (isAsm(f.name)) toAddAsm++;
-      if (existingAsm + toAddAsm > 1) { alert('Select exactly ONE .asm file. Extra .asm files were ignored.'); }
+      if (existingAsm + toAddAsm > 1) alert('Select exactly ONE .asm file. Extra .asm files were ignored.');
       for (const f of incoming) {
         if (isAsm(f.name) && existingAsm >= 1) continue;
         bag.set(f.name, f);
@@ -229,7 +226,7 @@ BUILD
       return initFs;
     }
 
-    // --- Wire up UI ----------------------------------------------------------
+    // Wire up
     elInput.addEventListener('change', () => { addFiles(elInput.files); elInput.value = ''; });
     elStart.addEventListener('click', async () => {
       try {
@@ -246,20 +243,20 @@ BUILD
     });
     elReset.addEventListener('click', () => location.reload());
 
-    // --- Boot sequence -------------------------------------------------------
+    // Boot
     let ready = false;
     (async () => {
       try {
-        elStatus.textContent = 'Enabling cross-origin isolation…';
-        await waitForCOIController(); // guarantees crossOriginIsolated true or throws
-        elStatus.textContent = 'Loading tools…';
-        await preloadTools();         // warm cache on first visit, resilient to slow Wi-Fi
+        elStatus.textContent = 'Waiting for site control…';
+        await waitForCOIController();
+        elStatus.textContent = 'Preloading tools…';
+        await preloadTools();
         ready = true;
         elStatus.textContent = 'Ready. Add exactly one .asm and click Start.';
         refresh();
       } catch (e) {
         console.error(e);
-        elStatus.textContent = 'Could not enable required features. Check that service workers are allowed.';
+        elStatus.textContent = 'Could not enable required features. Service workers may be blocked.';
       }
     })();
   })();
