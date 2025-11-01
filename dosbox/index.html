@@ -22,13 +22,13 @@
     main { width: 100%; max-width: 960px; padding: 16px; }
     h1 { margin: 0 0 12px 0; font-size: 20px; font-weight: 600; }
 
-    /* Loading screen */
+    /* Loading */
     #loading { margin: 8px 0 12px; }
     #status { font-size: 13px; color: #374151; margin-bottom: 6px; }
     #progWrap { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
     progress { width: 260px; height: 14px; }
 
-    /* App (hidden until ready) */
+    /* App */
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
     #dosbox { width: 100%; max-width: 896px; aspect-ratio: 1050/600; border: 1px solid #e5e7eb; background: #000; }
     button, label.file {
@@ -57,7 +57,6 @@
   })();
   </script>
 
-  <!-- js-dos (local UMD build) -->
   <script src="js-dos.js"></script>
 </head>
 <body>
@@ -103,10 +102,9 @@
     const elProgText = document.getElementById('progText');
 
     const encoder = new TextEncoder();
-    let player = null;    // js-dos player
-    let ci = null;        // command interface after warm boot
+    let player = null;
     let ready = false;
-    let toolBufs = new Map(); // filename -> Uint8Array
+    let toolBufs = new Map(); // DOS filename -> Uint8Array
 
     // ---------- COI gate ----------
     async function waitForCOIController(timeoutMs=8000){
@@ -163,7 +161,7 @@
         done++;
         elProg.value = done; elProgText.textContent = `${label} (${done}/${total})`;
       }
-      // fill in-memory from cache for earlier hits
+      // fill memory for cached earlier
       for (const f of files){
         if (!f.keepInMemory || mem.has(f.path)) continue;
         const hit = await cache.match(f.url);
@@ -176,20 +174,17 @@
       return mem;
     }
 
-    // ---------- DOS config / warm boot ----------
-    const DOS_CONF_IDLE = `
+    // ---------- DOS config ----------
+    const DOS_CONF = `
+[sdl]
+fullscreen=false
+
 [autoexec]
 @echo off
 mount c .
 c:
 cls
-echo Waiting for Start...
-:loop
-if exist GO.TXT goto run
-goto loop
-:run
-del GO.TXT
-CALL BUILD.BAT
+BUILD
 `;
 
     function buildBatFor(dosAsmName){
@@ -213,17 +208,17 @@ CALL BUILD.BAT
       return encoder.encode(lines.join("\r\n") + "\r\n");
     }
 
-    function warmBoot(){
+    function startDosWith(initFs){
       if (player && typeof player.exit==='function'){ try { player.exit(); } catch{} }
       elDos.innerHTML = '';
       player = DosGlobal(elDos, {
         pathPrefix: "emulators/",
-        dosboxConf: DOS_CONF_IDLE,
+        dosboxConf: DOS_CONF,
+        initFs,
         noCloud: true,
         noNetworking: true,
         kiosk: true,
-        autostart: true,
-        onEvent: (ev, arg) => { if (ev === "ci-ready") ci = arg; }
+        autostart: true
       });
     }
 
@@ -263,6 +258,7 @@ CALL BUILD.BAT
     // ---------- Wire up ----------
     elInput.addEventListener('change', ()=>{ addFiles(elInput.files); elInput.value=''; });
     elReset.addEventListener('click', ()=>location.reload());
+
     elStart.addEventListener('click', async ()=>{
       try{
         elStart.disabled = true;
@@ -272,29 +268,26 @@ CALL BUILD.BAT
 
         const asmText = await asmFiles[0].text();
         const dosAsmName = toDos83(asmFiles[0].name);
-        if (!ci) { alert('Emulator not ready yet.'); elStart.disabled = false; return; }
 
-        // Write tools into live FS (from memory buffers)
-        const required = ['TASM.EXE','TLINK.EXE'];
-        for (const p of required) {
-          const buf = toolBufs.get(p); if (buf) await ci.fsWriteFile(p, buf);
-        }
-        const optional = ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD'];
-        for (const p of optional) {
-          const buf = toolBufs.get(p); if (buf) await ci.fsWriteFile(p, buf);
-        }
+        // Build DOS filesystem
+        const initFs = [
+          { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
+          { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
+          { path: dosAsmName,  contents: encoder.encode(asmText) },
+          { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) }
+        ];
+        // optional (preloaded) tools
+        const opt = ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD'];
+        for (const p of opt) { const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf }); }
 
-        // Write user files
-        await ci.fsWriteFile(dosAsmName, encoder.encode(asmText));
+        // user extras
         for (const f of files){
           if (f === asmFiles[0]) continue;
           const buf = new Uint8Array(await f.arrayBuffer());
-          await ci.fsWriteFile(toDos83(f.name), buf);
+          initFs.push({ path: toDos83(f.name), contents: buf });
         }
 
-        // Write BUILD.BAT and trigger the waiting AUTOEXEC
-        await ci.fsWriteFile('BUILD.BAT', buildBatFor(dosAsmName));
-        await ci.fsWriteFile('GO.TXT', new Uint8Array());
+        startDosWith(initFs);
       } catch(e){
         console.error(e);
         alert('Error. See console.');
@@ -308,7 +301,7 @@ CALL BUILD.BAT
         elStatus.textContent = 'Waiting for site control…';
         await waitForCOIController();
 
-        // One combined list (WASM + tools) with file-count progress
+        // Preload everything (just to cache + get tool buffers)
         const preloadList = [
           { path:'emulators/wdosbox.wasm', url:'emulators/wdosbox.wasm', required:true,  keepInMemory:false },
           { path:'emulators/wdosbox.js',   url:'emulators/wdosbox.js',   required:false, keepInMemory:false },
@@ -321,16 +314,13 @@ CALL BUILD.BAT
         ];
         elStatus.textContent = 'Loading emulator and tools…';
         const mem = await preloadAllWithFileCount(preloadList, 'Loading emulator and tools');
-        // Store to toolBufs using only DOS filenames
+
+        // expose buffers by DOS filename
         toolBufs = new Map();
         for (const [k,v] of mem.entries()){
           const name = k.split('/').pop();
           toolBufs.set(name, v);
         }
-
-        // Warm-boot emulator so Start is instant
-        elStatus.textContent = 'Starting emulator…';
-        warmBoot();
 
         // Show UI
         ready = true;
