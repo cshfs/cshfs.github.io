@@ -62,9 +62,9 @@
 
     <!-- Loading screen -->
     <section id="loading">
-      <div id="status">Enabling required features…</div>
+      <div id="status">Preparing…</div>
       <div id="progWrap" class="hidden">
-        <progress id="prog" value="0"></progress>
+        <progress id="prog" value="0" max="100"></progress>
         <span id="progText"></span>
       </div>
     </section>
@@ -117,170 +117,76 @@
     // Cache
     const CACHE_NAME = 'dosbox-prewarm-v1';
 
-    async function getFromCache(url) {
-      const cache = await caches.open(CACHE_NAME);
-      const hit = await cache.match(url);
-      return hit ? new Uint8Array(await hit.arrayBuffer()) : null;
-    }
-
-    // Stream URL to Cache and memory with byte progress
-    async function streamToMemoryAndCache(url, label) {
-      // Cache fast path
-      const cached = await getFromCache(url);
-      if (cached) {
-        elProgWrap.classList.remove('hidden');
-        elProg.max = 100; elProg.value = 100;
-        elProgText.textContent = `${label} ready (from cache)`;
-        return cached;
-      }
-
+    // Download or load-from-cache with FILE COUNT progress
+    async function preloadAllWithFileCount(files, label) {
       elProgWrap.classList.remove('hidden');
-      elProg.value = 0; elProg.removeAttribute('max');
-      elProgText.textContent = `Downloading ${label}…`;
 
-      const req = new Request(url, { cache: 'reload' });
-      const resp = await fetch(req);
-      if (!resp.ok) throw new Error(`Fetch failed: ${url}`);
-      const len = Number(resp.headers.get('Content-Length')) || 0;
+      // Count only files we actually need to download; cached ones count as completed immediately.
+      let total = files.length;
+      let done = 0;
 
+      // First pass: check cache
       const cache = await caches.open(CACHE_NAME);
+      const results = new Map();
 
-      let progressStream = null, cacheStream = null;
-      if (resp.body) [progressStream, cacheStream] = resp.body.tee();
-
-      const cacheResp = new Response(cacheStream || resp.body, {
-        status: resp.status, statusText: resp.statusText, headers: resp.headers
-      });
-      const putP = cache.put(req, cacheResp);
-
-      let loaded = 0;
-      const chunks = [];
-      if (progressStream) {
-        if (len > 0) elProg.max = 100;
-        const reader = progressStream.getReader();
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          loaded += value.byteLength;
-          if (len > 0) {
-            const pct = Math.min(100, Math.floor((loaded / len) * 100));
-            elProg.value = pct;
-            elProgText.textContent = `Downloading ${label}… ${pct}%`;
+      for (const f of files) {
+        const hit = await cache.match(f.url);
+        if (hit) {
+          // Cache hit
+          done++;
+          elProg.max = total;
+          elProg.value = done;
+          elProgText.textContent = `${label} (${done}/${total})`;
+          if (f.keepInMemory) {
+            const buf = new Uint8Array(await hit.clone().arrayBuffer());
+            results.set(f.path, buf);
           }
         }
-      } else {
-        const buf = new Uint8Array(await resp.arrayBuffer());
-        chunks.push(buf);
       }
 
-      await putP;
-
-      let total = 0; for (const c of chunks) total += c.byteLength;
-      const out = new Uint8Array(total);
-      let off = 0; for (const c of chunks) { out.set(c, off); off += c.byteLength; }
-
-      elProg.value = 100; elProg.max = 100;
-      elProgText.textContent = `${label} ready`;
-      return out;
-    }
-
-    // Download many files with aggregate byte progress and cache reuse
-    async function downloadManyWithProgress(files, label) {
-      const cache = await caches.open(CACHE_NAME);
-
-      // Determine total known size from HEAD or cached bytes
-      let totalKnown = 0;
-      const meta = [];
+      // Second pass: fetch misses
       for (const f of files) {
-        const cached = await cache.match(f.url);
-        if (cached) {
-          const buf = new Uint8Array(await cached.clone().arrayBuffer());
-          meta.push({ f, cached: true, size: buf.byteLength, buf });
-          totalKnown += buf.byteLength;
-          continue;
-        }
-        try {
-          const head = await fetch(f.url, { method: 'HEAD', cache: 'reload' });
-          const n = Number(head.headers.get('Content-Length')) || 0;
-          meta.push({ f, cached: false, size: n });
-          totalKnown += n;
-        } catch {
-          meta.push({ f, cached: false, size: 0 });
-        }
-      }
+        const hit = await cache.match(f.url);
+        if (hit) continue;
 
-      const result = new Map();
-      let loaded = 0;
-
-      elProgWrap.classList.remove('hidden');
-      if (totalKnown > 0) { elProg.max = 100; elProg.value = 0; } else { elProg.removeAttribute('max'); }
-      elProgText.textContent = `${label}…`;
-
-      // Fill from cache first
-      for (const m of meta) {
-        if (m.cached) {
-          result.set(m.f.path, m.buf);
-        }
-      }
-
-      // Fetch missing
-      for (const m of meta) {
-        if (m.cached) continue;
-
-        const req = new Request(m.f.url, { cache: 'reload' });
+        const req = new Request(f.url, { cache: 'reload' });
         const resp = await fetch(req);
         if (!resp.ok) {
-          if (m.f.required) throw new Error('Missing required file: ' + m.f.path);
-          continue;
-        }
-
-        let progStream = null, cacheStream = null;
-        if (resp.body) [progStream, cacheStream] = resp.body.tee();
-
-        // write cache
-        if (cacheStream) {
-          const cacheResp = new Response(cacheStream, { status: resp.status, statusText: resp.statusText, headers: resp.headers });
-          cache.put(req, cacheResp).catch(() => {});
+          if (f.required) throw new Error('Required file failed: ' + f.url);
+          // Non-required skip but still advance count
         } else {
+          // Put in cache
           cache.put(req, resp.clone()).catch(() => {});
-        }
-
-        // read into memory with progress
-        const chunks = [];
-        if (progStream) {
-          const reader = progStream.getReader();
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            chunks.push(value);
-            if (totalKnown > 0) {
-              loaded += value.byteLength;
-              const pct = Math.min(100, Math.floor((loaded / totalKnown) * 100));
-              elProg.value = pct;
-              elProgText.textContent = `${label} ${pct}%`;
-            }
-          }
-        } else {
-          const buf = new Uint8Array(await resp.arrayBuffer());
-          chunks.push(buf);
-          if (totalKnown > 0) {
-            loaded += buf.byteLength;
-            const pct = Math.min(100, Math.floor((loaded / totalKnown) * 100));
-            elProg.value = pct;
-            elProgText.textContent = `${label} ${pct}%`;
+          // Keep in memory if asked
+          if (f.keepInMemory) {
+            const buf = new Uint8Array(await resp.clone().arrayBuffer());
+            results.set(f.path, buf);
           }
         }
 
-        let total = 0; for (const c of chunks) total += c.byteLength;
-        const out = new Uint8Array(total);
-        let off = 0; for (const c of chunks) { out.set(c, off); off += c.byteLength; }
-        result.set(m.f.path, out);
+        done++;
+        elProg.max = total;
+        elProg.value = done;
+        elProgText.textContent = `${label} (${done}/${total})`;
       }
 
-      elProg.max = 100; elProg.value = 100;
-      elProgText.textContent = `${label.replace(/\.\.\.$/,'')} ready`;
-      return result;
+      // If some memory buffers still missing due to cached pass, fill from cache now
+      for (const f of files) {
+        if (!f.keepInMemory) continue;
+        if (results.has(f.path)) continue;
+        const hit = await cache.match(f.url);
+        if (hit) {
+          const buf = new Uint8Array(await hit.clone().arrayBuffer());
+          results.set(f.path, buf);
+        }
+      }
+
+      if (done < total) {
+        elProg.max = total;
+        elProg.value = total;
+      }
+      elProgText.textContent = `${label} complete`;
+      return results;
     }
 
     // DOS config
@@ -385,7 +291,7 @@ BUILD
           { path: dosAsmName,  contents: encoder.encode(asmText) },
           { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) }
         ];
-        // Optional overlays always preloaded per your choice
+        // Optional overlays and extras
         const opt = ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD'];
         for (const p of opt) { const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf }); }
 
@@ -404,22 +310,22 @@ BUILD
         elStatus.textContent = 'Waiting for site control…';
         await waitForCOIController();
 
-        // Emulator WASM
-        elStatus.textContent = 'Downloading emulator…';
-        await streamToMemoryAndCache('emulators/wdosbox.wasm', 'emulator (WASM)');
-        caches.open(CACHE_NAME).then(async (c) => { try { await c.add('emulators/wdosbox.js'); } catch {} });
-
-        // Tools (all) with cache reuse + byte progress
-        elStatus.textContent = 'Loading tools…';
-        const files = [
-          { path: 'TASM.EXE',     url: 'tools/TASM.EXE',     required: true  },
-          { path: 'TLINK.EXE',    url: 'tools/TLINK.EXE',    required: true  },
-          { path: 'DPMI16BI.OVL', url: 'tools/DPMI16BI.OVL', required: false },
-          { path: 'RTM.EXE',      url: 'tools/RTM.EXE',      required: false },
-          { path: 'TD.EXE',       url: 'tools/TD.EXE',       required: false },
-          { path: 'TDCONFIG.TD',  url: 'tools/TDCONFIG.TD',  required: false }
+        // One combined list for progress-by-file
+        const preloadList = [
+          // Emulator
+          { path: 'wdosbox.wasm', url: 'emulators/wdosbox.wasm', required: true,  keepInMemory: false },
+          { path: 'wdosbox.js',   url: 'emulators/wdosbox.js',   required: false, keepInMemory: false },
+          // Tools (keep in memory for initFs)
+          { path: 'TASM.EXE',     url: 'tools/TASM.EXE',         required: true,  keepInMemory: true  },
+          { path: 'TLINK.EXE',    url: 'tools/TLINK.EXE',        required: true,  keepInMemory: true  },
+          { path: 'DPMI16BI.OVL', url: 'tools/DPMI16BI.OVL',     required: false, keepInMemory: true  },
+          { path: 'RTM.EXE',      url: 'tools/RTM.EXE',          required: false, keepInMemory: true  },
+          { path: 'TD.EXE',       url: 'tools/TD.EXE',           required: false, keepInMemory: true  },
+          { path: 'TDCONFIG.TD',  url: 'tools/TDCONFIG.TD',      required: false, keepInMemory: true  }
         ];
-        toolBufs = await downloadManyWithProgress(files, 'Loading tools…');
+
+        elStatus.textContent = 'Loading emulator and tools…';
+        toolBufs = await preloadAllWithFileCount(preloadList, 'Loading emulator and tools');
 
         // Ready
         ready = true;
