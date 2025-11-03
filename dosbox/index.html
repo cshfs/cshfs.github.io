@@ -35,42 +35,27 @@
     background:#111; color:#fff; border:2px solid #111; cursor:pointer;
   }
   .btn:hover { background:#000; border-color:#000; }
-  .btn[disabled]{ opacity:.55; cursor:not-allowed; }
+  .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
   input[type="text"] { font: inherit; padding: 8px; border:2px solid #111; width: 240px; background:#fff; color:#000; }
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
   /* Editor */
-  .CodeMirror { height: 420px; border:2px solid #111; background:#fff; color:#000; }
+  .CodeMirror { height: 420px; border:2px solid #111; background:#fff; color:#000; transition: opacity .15s ease; }
   .CodeMirror-focused { outline: 2px solid #1115; }
+  .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
   .note { font-size: 13px; color:#333; background:#fff; }
 
   /* DOSBox */
   #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border:2px solid #111; }
   ul { margin: 6px 0 0 18px; padding: 0; background:#fff; }
+
+  /* Force js-dos wrappers to white */
+  html, body, main, section { background:#fff !important; }
+  #dosbox *, .dosbox, .dosbox-root, .dosbox-container, .dosbox-viewport,
+  .dosbox-overlay, .dosbox-loader { background:#fff !important; box-shadow:none !important; border-color:#fff !important; }
+  #dosbox canvas { background:#000 !important; }
 </style>
-  <style>
-/* --- Force full-white page and neutralize js-dos dark wrappers --- */
-html, body, main, section { background:#fff !important; }
-body { margin:0 !important; }
-
-/* The host we control */
-#dosbox { background:#000 !important; }
-
-/* Everything js-dos injects around the canvas */
-#dosbox *,                      /* generic */
-.dosbox, .dosbox-root,
-.dosbox-container, .dosbox-viewport,
-.dosbox-overlay, .dosbox-loader {
-  background:#fff !important;
-  box-shadow:none !important;
-  border-color:#fff !important;
-}
-
-/* Keep only the canvas black */
-#dosbox canvas { background:#000 !important; }
-</style>
-
 
 <script>
 /* Service worker for COOP/COEP on GitHub Pages */
@@ -98,7 +83,7 @@ body { margin:0 !important; }
   </section>
 
   <!-- Editor -->
-  <section>
+  <section id="editorSection">
     <h1>Editor</h1>
     <div class="row">
       <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
@@ -134,7 +119,7 @@ END main
     <div class="row">
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
       <button id="startBtn" class="btn" type="button" disabled>Start</button>
-      <button id="resetBtn" class="btn" type="button">Reset</button>
+      <button id="stopBtn" class="btn" type="button">Stop</button>
     </div>
     <div id="dosbox" aria-label="DOSBox frame"></div>
     <ul id="fileList"></ul>
@@ -148,6 +133,7 @@ END main
   const LS_KEY_TEXT = 'dos_editor_text_v1';
 
   // ----- CodeMirror -----
+  const cmRoot = document.getElementById('editorSection');
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
   });
@@ -169,7 +155,7 @@ END main
   const elInput = document.getElementById('fileInput');
   const elList = document.getElementById('fileList');
   const startBtn = document.getElementById('startBtn');
-  const resetBtn = document.getElementById('resetBtn');
+  const stopBtn = document.getElementById('stopBtn');
 
   // State
   const encoder = new TextEncoder();
@@ -225,7 +211,7 @@ BUILD
       'echo Build failed.',
       ':END'
     ];
-    return encoder.encode(lines.join("\r\n") + "\r\n"); // real CRLF
+    return encoder.encode(lines.join("\r\n") + "\r\n"); // CRLF
   }
 
   function startDosWith(initFs){
@@ -278,6 +264,8 @@ BUILD
     const mem = new Map();
 
     let total = files.length, done = 0;
+    const prog = document.getElementById('prog');
+    const progText = document.getElementById('progText');
     prog.max = total; prog.value = 0; progText.textContent = `0/${total}`;
 
     for (const f of files) {
@@ -316,8 +304,8 @@ BUILD
     toolBufs = new Map();
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
-    // Hide the loading strip when ready
-    loadingBox.style.display = 'none';
+    // Hide loading strip when ready
+    document.getElementById('loading').style.display = 'none';
     ready = true;
     startBtn.disabled = false;
   }
@@ -352,13 +340,19 @@ BUILD
     elInput.value = '';
   });
 
-  // Start / Reset
+  // Start
   startBtn.addEventListener('click', async ()=>{
     try {
-      // Persist editor name + text on Start
+      // Persist editor state
       const nameRaw = (fileNameEl.value || 'HELLO.ASM').trim();
       localStorage.setItem(LS_KEY_NAME, nameRaw);
       localStorage.setItem(LS_KEY_TEXT, cm.getValue());
+
+      // Grey-out editor and disable Start
+      cm.setOption('readOnly', true);
+      cmRoot.classList.add('cm-locked');
+      startBtn.disabled = true;
+      startBtn.classList.add('disabled');
 
       const dosAsmName = toDos83(nameRaw);
       const asmBytes = encoder.encode(cm.getValue());
@@ -384,7 +378,11 @@ BUILD
     }
   });
 
-  resetBtn.addEventListener('click', ()=> location.reload());
+  // Stop: scroll to top, then reload
+  stopBtn.addEventListener('click', ()=>{
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(()=>location.reload(), 250);
+  });
 
   // Boot
   (async ()=>{
