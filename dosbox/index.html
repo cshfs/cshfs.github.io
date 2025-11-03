@@ -74,6 +74,45 @@
     background:#fff !important; box-shadow:none !important; border-color:#fff !important;
   }
   #dosbox canvas { background:#000 !important; }
+
+  /* Medium contrast styling for TASM mode */
+
+.cm-s-default .cm-tasm-label {
+  color: #6a1b9a;        /* Purple labels */
+  font-weight: 600;
+}
+
+.cm-s-default .cm-tasm-directive {
+  color: #1565c0;        /* Medium blue */
+  font-weight: 600;
+}
+
+.cm-s-default .cm-builtin {
+  color: #0277bd;        /* Instruction: cyan/blue */
+}
+
+.cm-s-default .cm-keyword {
+  color: #2e7d32;        /* Keywords: green */
+  font-weight: 500;
+}
+
+.cm-s-default .cm-number {
+  color: #ad1457;        /* Numbers: rose */
+}
+
+.cm-s-default .cm-variable-2 {
+  color: #00838f;        /* Registers: teal */
+  font-weight: 500;
+}
+
+.cm-s-default .cm-string {
+  color: #c62828;        /* Strings: red */
+}
+
+.cm-s-default .cm-comment {
+  color: #777;
+  font-style: italic;
+}
 </style>
 
 <script>
@@ -155,7 +194,7 @@ END main
   const workspace = document.getElementById('workspace');
   const mainEl = document.querySelector('main');
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
-    lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
+    lineNumbers: true, mode: 'tasm', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
   });
 
   const status = document.getElementById('status');
@@ -203,6 +242,18 @@ END main
   window.addEventListener('resize', resizeEditor);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeEditor);
   setTimeout(resizeEditor, 0);
+
+  function autoDetectTasm(filename) {
+  if (filename && filename.toLowerCase().endsWith(".asm")) {
+    cm.setOption("mode", "tasm");
+  } else {
+    cm.setOption("mode", null); // plain text
+  }
+}
+
+// Call whenever filename changes
+fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
+autoDetectTasm(fileNameEl.value);
 
   /* ---------- DOSBox: scale to fit viewport on small screens ---------- */
   const AR_W = 1050, AR_H = 600; // DOSBox desired aspect
