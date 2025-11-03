@@ -1,14 +1,12 @@
-// coi-sw.js — COOP/COEP + navigation handling + precache + Brotli preference
-// Works on GitHub Pages by re-serving pages with headers after SW takes control.
+// coi-sw.js — COOP/COEP + navigation handling + precache + Brotli preference (GitHub Pages friendly)
 
 const COOP = 'same-origin';
 const COEP = 'require-corp';
 const CACHE_NAME = 'dosbox-prewarm-v8';
 
-// Add your entry HTML explicitly so navigations can be served with headers.
 const PRECACHE = [
-  './',                 // the directory index
-  'index.html',         // explicit index
+  './',
+  'index.html',
   'js-dos.js',
   'js-dos.css',
   // Emulator
@@ -21,7 +19,7 @@ const PRECACHE = [
   'tools/RTM.EXE',
   'tools/TD.EXE',
   'tools/TDCONFIG.TD',
-  // Optional .br siblings if you generated them (leave commented if not present)
+  // Optional Brotli siblings (uncomment only if present)
   // 'emulators/wdosbox.wasm.br',
   // 'emulators/wdosbox.js.br',
   // 'tools/TASM.EXE.br',
@@ -35,9 +33,7 @@ const PRECACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
-    try {
-      await cache.addAll(PRECACHE);
-    } catch (_) {}
+    try { await cache.addAll(PRECACHE); } catch {}
     await self.skipWaiting();
   })());
 });
@@ -46,7 +42,6 @@ self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const names = await caches.keys();
     await Promise.all(names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n)));
-    // Optional: navigation preload can help, but not required
     if ('navigationPreload' in self.registration) {
       try { await self.registration.navigationPreload.enable(); } catch {}
     }
@@ -54,7 +49,6 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
-// Prefer .br when available
 const BR_MAP = {
   'emulators/wdosbox.wasm': 'emulators/wdosbox.wasm.br',
   'emulators/wdosbox.js':   'emulators/wdosbox.js.br',
@@ -72,10 +66,7 @@ function withHeaders(resp, extra = {}) {
   headers.set('Cross-Origin-Embedder-Policy', COEP);
   if (extra.contentType) headers.set('Content-Type', extra.contentType);
   if (extra.contentEncoding) headers.set('Content-Encoding', extra.contentEncoding);
-  // Immutable cache headers help first-load perf
-  if (!extra.noCacheControl) {
-    headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-  }
+  if (!extra.noCacheControl) headers.set('Cache-Control', 'public, max-age=31536000, immutable');
   return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
 }
 
@@ -103,30 +94,26 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // Handle top-level navigations (HTML) with headers applied
+  // Serve navigations (HTML) with headers applied
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
-      // Network-first for HTML (so updates apply), with cache fallback
       try {
         const netResp = await fetch(req);
         if (netResp && netResp.ok) {
           cache.put(req, netResp.clone()).catch(()=>{});
-          // Do NOT set immutable caching on HTML to allow updates
           return withHeaders(netResp, { noCacheControl: true, contentType: 'text/html; charset=utf-8' });
         }
       } catch {}
-      // Fallback to cached index.html / './'
       const fallback = await cache.match('index.html') || await cache.match('./');
       if (fallback) return withHeaders(fallback, { noCacheControl: true, contentType: 'text/html; charset=utf-8' });
-      // As last resort, fetch normally and add headers
       const resp = await fetch(req);
       return withHeaders(resp, { noCacheControl: true, contentType: 'text/html; charset=utf-8' });
     })());
     return;
   }
 
-  // Non-navigation: cache-first, prefer .br when present
+  // Static assets: cache-first, prefer .br
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
     const cached = await brOrNormal(cache, req);
