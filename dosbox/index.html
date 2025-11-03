@@ -1,105 +1,86 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DOSBox — Editor + Run</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>DOSBox — Editor + Run</title>
 
-  <!-- Local js-dos bundle -->
-  <link rel="stylesheet" href="js-dos.css" />
-  <script src="js-dos.js"></script>
+<link rel="stylesheet" href="js-dos.css" />
+<script src="js-dos.js"></script>
 
-  <!-- CodeMirror 5 (CDN) -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/mode/gas/gas.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/mode/gas/gas.min.js"></script>
 
-  <style>
-    :root { color-scheme: light; }
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      margin: 0; background: #fff; color: #111;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      display: block;
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: #fff; color: #000;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  }
+  main { width: 100%; max-width: 980px; margin: 0 auto; padding: 12px; }
+
+  h1 { margin: 0 0 12px; font-size: 20px; }
+  section { margin: 12px 0; }
+
+  /* Loading */
+  #loading { padding: 8px 0; }
+  #status { font-size: 14px; margin: 6px 0; }
+  progress { width: 260px; height: 12px; vertical-align: middle; }
+
+  /* Controls */
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  .btn { font: inherit; padding: 8px 12px; background: #f2f2f2; border: 1px solid #ccc; cursor: pointer; }
+  .btn[disabled]{ opacity:.6; cursor:not-allowed; }
+  input[type="text"] { font: inherit; padding: 8px; border: 1px solid #ccc; width: 220px; }
+  label.file { position: relative; }
+  label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+
+  /* Editor */
+  .CodeMirror { height: 420px; border: 1px solid #ccc; }
+
+  /* DOSBox frame */
+  #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border: 1px solid #ccc; }
+  ul { margin: 6px 0 0 18px; padding: 0; }
+  .note { font-size: 13px; color:#444; }
+</style>
+
+<script>
+(function registerCOI() {
+  if (!('serviceWorker' in navigator)) return;
+  const swUrl = new URL('./coi-sw.js', location.href);
+  const KEY = 'coi-reloaded-once';
+  navigator.serviceWorker.register(swUrl, { scope: './' }).then(async () => {
+    if (!navigator.serviceWorker.controller && !sessionStorage.getItem(KEY)) {
+      try { await navigator.serviceWorker.ready; sessionStorage.setItem(KEY,'1'); location.reload(); } catch {}
     }
-    main { width: 100%; max-width: 1100px; margin: 0 auto; padding: 16px; }
-    h1 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
-
-    /* Loading strip */
-    #loading {
-      border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 16px;
-      background: #fafafa;
-    }
-    #status { font-size: 13px; color: #374151; margin-bottom: 6px; }
-    #progWrap { display: flex; align-items: center; gap: 8px; }
-    progress { width: 280px; height: 12px; }
-
-    /* Editor section */
-    section { margin-bottom: 18px; }
-    .panel { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
-    .panel h2 { margin: 0 0 10px; font-size: 16px; font-weight: 600; }
-    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 10px; }
-    .btn {
-      font: inherit; font-size: 14px; padding: 10px 14px; border-radius: 8px;
-      border: 1px solid #e5e7eb; background: #f8fafc; color: #111; cursor: pointer;
-    }
-    .btn[disabled]{ opacity:.6; cursor:not-allowed; }
-    input[type="text"] {
-      font: inherit; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px; width: 220px;
-    }
-    label.file { position: relative; }
-    label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
-    .cm-wrap { border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
-    .CodeMirror { height: 440px; }
-
-    /* Emulator section */
-    #dosbox {
-      width: 100%; aspect-ratio: 1050/600;
-      border: 1px solid #e5e7eb; background:#000;
-    }
-    ul { margin: 8px 0 0; padding-left: 18px; }
-    .muted { font-size: 12px; color:#6b7280; }
-  </style>
-
-  <!-- Register SW early (COOP/COEP + caching). Reload once when ready. -->
-  <script>
-  (function registerCOI() {
-    if (!('serviceWorker' in navigator)) return;
-    const swUrl = new URL('./coi-sw.js', location.href);
-    const KEY = 'coi-reloaded-once';
-    navigator.serviceWorker.register(swUrl, { scope: './' }).then(async () => {
-      if (!navigator.serviceWorker.controller && !sessionStorage.getItem(KEY)) {
-        try { await navigator.serviceWorker.ready; sessionStorage.setItem(KEY, '1'); location.reload(); } catch {}
-      }
-    });
-    navigator.serviceWorker.addEventListener('controllerchange', () => { sessionStorage.removeItem(KEY); });
-  })();
-  </script>
+  });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { sessionStorage.removeItem(KEY); });
+})();
+</script>
 </head>
 <body>
-  <main>
-    <!-- Loading screen -->
-    <section id="loading" class="panel">
-      <div id="status">Preparing emulator…</div>
-      <div id="progWrap">
-        <progress id="prog" value="0" max="100"></progress>
-        <span id="progText"></span>
-      </div>
-      <div id="coiNote" class="muted" style="margin-top:6px;"></div>
-    </section>
+<main>
+  <!-- Loading -->
+  <section id="loading">
+    <div id="status">Preparing emulator…</div>
+    <progress id="prog" value="0" max="100"></progress>
+    <span id="progText"></span>
+    <div id="coiNote" class="note"></div>
+  </section>
 
-    <!-- Editor -->
-    <section class="panel" id="editorPanel">
-      <h2>Editor</h2>
-      <div class="row">
-        <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
-        <button id="saveBtn" class="btn" type="button">Download .ASM</button>
-        <button id="loadBtn" class="btn" type="button">Load .ASM into editor</button>
-        <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
-      </div>
-      <div class="cm-wrap">
-        <textarea id="editorTA">; 16-bit DOS example for TASM/TLINK
+  <!-- Editor -->
+  <section>
+    <h1>Editor</h1>
+    <div class="row">
+      <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
+      <button id="saveBtn" class="btn" type="button">Download .ASM</button>
+      <button id="loadBtn" class="btn" type="button">Load .ASM</button>
+      <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
+    </div>
+    <textarea id="editorTA">; 16-bit DOS example for TASM/TLINK
 .MODEL  small
 .STACK  100h
 .DATA
@@ -116,69 +97,67 @@ main PROC
 main ENDP
 END main
 </textarea>
-      </div>
-      <p class="muted" style="margin-top:8px;">
-        Tip: The editor content is used as the single <code>.ASM</code> source. Use the assets picker below for extra files (images/data, etc.).
-      </p>
-    </section>
+    <div class="note" style="margin-top:6px;">
+      The editor content is the single <code>.ASM</code> source. Use the picker below for extra asset files only.
+    </div>
+  </section>
 
-    <!-- Emulator -->
-    <section class="panel" id="emuPanel">
-      <h2>Emulator</h2>
-      <div class="row">
-        <label class="file btn">Choose extra asset files
-          <input id="fileInput" type="file" multiple />
-        </label>
-        <button id="startBtn" class="btn" type="button" disabled>Start</button>
-        <button id="resetBtn" class="btn" type="button">Reset</button>
-      </div>
-      <div id="dosbox" aria-label="DOSBox frame"></div>
-      <ul id="fileList"></ul>
-    </section>
-  </main>
+  <!-- Emulator -->
+  <section>
+    <h1>Emulator</h1>
+    <div class="row">
+      <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
+      <button id="startBtn" class="btn" type="button" disabled>Start</button>
+      <button id="resetBtn" class="btn" type="button">Reset</button>
+    </div>
+    <div id="dosbox" aria-label="DOSBox frame"></div>
+    <ul id="fileList"></ul>
+  </section>
+</main>
 
-  <script>
-  (function(){
-    // ----- CodeMirror -----
-    const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
-      lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false,
-    });
+<script>
+(function(){
+  // ----- Editor -----
+  const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
+    lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false,
+  });
 
-    // ----- Elements -----
-    const status = document.getElementById('status');
-    const prog = document.getElementById('prog');
-    const progText = document.getElementById('progText');
-    const coiNote = document.getElementById('coiNote');
+  // Elements
+  const status = document.getElementById('status');
+  const prog = document.getElementById('prog');
+  const progText = document.getElementById('progText');
+  const coiNote = document.getElementById('coiNote');
 
-    const fileNameEl = document.getElementById('fileName');
-    const saveBtn = document.getElementById('saveBtn');
-    const loadBtn = document.getElementById('loadBtn');
-    const loader = document.getElementById('loader');
+  const fileNameEl = document.getElementById('fileName');
+  const saveBtn = document.getElementById('saveBtn');
+  const loadBtn = document.getElementById('loadBtn');
+  const loader = document.getElementById('loader');
 
-    const elDos = document.getElementById('dosbox');
-    const elInput = document.getElementById('fileInput');
-    const elList = document.getElementById('fileList');
-    const startBtn = document.getElementById('startBtn');
-    const resetBtn = document.getElementById('resetBtn');
+  const elDos = document.getElementById('dosbox');
+  const elInput = document.getElementById('fileInput');
+  const elList = document.getElementById('fileList');
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
 
-    // ----- State -----
-    const encoder = new TextEncoder();
-    const CACHE_NAME = 'dosbox-prewarm-v8'; // keep in sync with coi-sw.js
-    let toolBufs = new Map(); // DOS filename -> Uint8Array
-    let player = null;
-    let ready = false;
+  // State
+  const encoder = new TextEncoder();
+  const CACHE_NAME = 'dosbox-prewarm-v8';
+  let toolBufs = new Map();
+  let player = null;
+  let ready = false;
+  const bag = new Map(); // asset files
 
-    // ----- Helpers -----
-    const toDos83 = (name)=>{
-      const i = name.lastIndexOf('.');
-      let b = (i>=0?name.slice(0,i):name).toUpperCase();
-      let e = (i>=0?name.slice(i+1):'').toUpperCase();
-      const clean = s=>s.replace(/[^A-Z0-9]/g,'_');
-      b = clean(b).slice(0,8); e = clean(e).slice(0,3);
-      return e?`${b}.${e}`:b;
-    };
+  // Helpers
+  const toDos83 = (name)=>{
+    const i = name.lastIndexOf('.');
+    let b = (i>=0?name.slice(0,i):name).toUpperCase();
+    let e = (i>=0?name.slice(i+1):'').toUpperCase();
+    const clean = s=>s.replace(/[^A-Z0-9]/g,'_');
+    b = clean(b).slice(0,8); e = clean(e).slice(0,3);
+    return e?`${b}.${e}`:b;
+  };
 
-    const DOS_CONF = `
+  const DOS_CONF = `
 [sdl]
 fullscreen=false
 
@@ -190,208 +169,190 @@ cls
 BUILD
 `;
 
-    function buildBatFor(dosAsmName){
-      const base = dosAsmName.replace(/\.[^.]*$/,'');
-      const lines = [
-        '@echo off',
-        'echo Assembling ' + dosAsmName,
-        'TASM /zi /q ' + dosAsmName,
-        'if errorlevel 1 goto ERR',
-        'echo Linking ' + base + '.OBJ',
-        'TLINK /v ' + base + '.OBJ,,NUL,;',
-        'if errorlevel 1 goto ERR',
-        'echo Running ' + base + '.EXE',
-        base + '.EXE',
-        'echo.',
-        'goto END',
-        ':ERR',
-        'echo Build failed.',
-        ':END'
-      ];
-      return encoder.encode(lines.join("\\r\\n") + "\\r\\n");
+  function buildBatFor(dosAsmName){
+    const base = dosAsmName.replace(/\.[^.]*$/,'');
+    const lines = [
+      '@echo off',
+      'echo Assembling ' + dosAsmName,
+      'TASM /zi /q ' + dosAsmName,
+      'if errorlevel 1 goto ERR',
+      'echo Linking ' + base + '.OBJ',
+      'TLINK /v ' + base + '.OBJ,,NUL,;',
+      'if errorlevel 1 goto ERR',
+      'echo Running ' + base + '.EXE',
+      base + '.EXE',
+      'echo.',
+      'goto END',
+      ':ERR',
+      'echo Build failed.',
+      ':END'
+    ];
+    // REAL CRLFs here:
+    return encoder.encode(lines.join("\r\n") + "\r\n");
+  }
+
+  function startDosWith(initFs){
+    if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
+    elDos.innerHTML = '';
+    player = window.Dos(elDos, {
+      pathPrefix: "emulators/",
+      dosboxConf: DOS_CONF,
+      initFs,
+      noCloud: true,
+      noNetworking: true,
+      kiosk: true,
+      autostart: true
+    });
+  }
+
+  async function waitForCOIController(timeoutMs=8000){
+    const t0 = performance.now();
+    while (performance.now() - t0 < timeoutMs) {
+      if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
+      await new Promise(r=>setTimeout(r,120));
     }
+    coiNote.textContent = 'Note: page is not cross-origin isolated yet. If Start fails, hard-refresh once.';
+  }
 
-    function startDosWith(initFs){
-      if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
-      elDos.innerHTML = '';
-      player = window.Dos(elDos, {
-        pathPrefix: "emulators/",
-        dosboxConf: DOS_CONF,
-        initFs,
-        noCloud: true,
-        noNetworking: true,
-        kiosk: true,
-        autostart: true
-      });
+  function refreshFileList(){
+    const files = Array.from(bag.values());
+    elList.innerHTML = '';
+    for (const f of files) {
+      const li = document.createElement('li');
+      li.textContent = `${f.name} → ${toDos83(f.name)}`;
+      elList.appendChild(li);
     }
+  }
 
-    async function waitForCOIController(timeoutMs=8000){
-      const t0 = performance.now();
-      while (performance.now() - t0 < timeoutMs) {
-        if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
-        await new Promise(r=>setTimeout(r,120));
-      }
-      // Not fatal; js-dos may still start on some builds, but we surface a hint.
-      coiNote.textContent = 'Note: page is not cross-origin isolated yet. If Start fails, hard-refresh once.';
-    }
+  // Preload emulator + tools
+  async function preloadAll(){
+    status.textContent = 'Caching emulator and tools…';
+    const files = [
+      { path:'emulators/wdosbox.wasm', url:'emulators/wdosbox.wasm', required:true,  keepInMemory:false },
+      { path:'emulators/wdosbox.js',   url:'emulators/wdosbox.js',   required:false, keepInMemory:false },
+      { path:'TASM.EXE',     url:'tools/TASM.EXE',     required:true,  keepInMemory:true },
+      { path:'TLINK.EXE',    url:'tools/TLINK.EXE',    required:true,  keepInMemory:true },
+      { path:'DPMI16BI.OVL', url:'tools/DPMI16BI.OVL', required:false, keepInMemory:true },
+      { path:'RTM.EXE',      url:'tools/RTM.EXE',      required:false, keepInMemory:true },
+      { path:'TD.EXE',       url:'tools/TD.EXE',       required:false, keepInMemory:true },
+      { path:'TDCONFIG.TD',  url:'tools/TDCONFIG.TD',  required:false, keepInMemory:true },
+    ];
+    const cache = await caches.open(CACHE_NAME);
+    const mem = new Map();
 
-    // ----- Preload everything with file-count progress -----
-    async function preloadAll(){
-      status.textContent = 'Caching emulator and tools…';
-      const files = [
-        { path:'emulators/wdosbox.wasm', url:'emulators/wdosbox.wasm', required:true,  keepInMemory:false },
-        { path:'emulators/wdosbox.js',   url:'emulators/wdosbox.js',   required:false, keepInMemory:false },
-        { path:'TASM.EXE',     url:'tools/TASM.EXE',     required:true,  keepInMemory:true },
-        { path:'TLINK.EXE',    url:'tools/TLINK.EXE',    required:true,  keepInMemory:true },
-        { path:'DPMI16BI.OVL', url:'tools/DPMI16BI.OVL', required:false, keepInMemory:true },
-        { path:'RTM.EXE',      url:'tools/RTM.EXE',      required:false, keepInMemory:true },
-        { path:'TD.EXE',       url:'tools/TD.EXE',       required:false, keepInMemory:true },
-        { path:'TDCONFIG.TD',  url:'tools/TDCONFIG.TD',  required:false, keepInMemory:true },
-      ];
-      const cache = await caches.open(CACHE_NAME);
-      const mem = new Map();
+    let total = files.length, done = 0;
+    prog.max = total; prog.value = 0; progText.textContent = `0/${total}`;
 
-      let total = files.length, done = 0;
-      prog.max = total; prog.value = 0; progText.textContent = `0/${total}`;
-
-      // Cache hits first
-      for (const f of files) {
-        const hit = await cache.match(f.url);
-        if (hit) {
-          done++; prog.value = done; progText.textContent = `${done}/${total}`;
-          if (f.keepInMemory) {
-            const buf = new Uint8Array(await hit.clone().arrayBuffer());
-            mem.set(f.path, buf);
-          }
-        }
-      }
-      // Fetch misses
-      for (const f of files) {
-        const hit = await cache.match(f.url);
-        if (hit) continue;
-        const resp = await fetch(new Request(f.url, { cache:'reload' })).catch(()=>null);
-        if (!resp || !resp.ok) {
-          if (f.required) throw new Error('Network error loading ' + f.url);
-        } else {
-          cache.put(f.url, resp.clone()).catch(()=>{});
-          if (f.keepInMemory) {
-            const buf = new Uint8Array(await resp.clone().arrayBuffer());
-            mem.set(f.path, buf);
-          }
-        }
+    // hits
+    for (const f of files) {
+      const hit = await cache.match(f.url);
+      if (hit) {
         done++; prog.value = done; progText.textContent = `${done}/${total}`;
-      }
-      // Fill mem for earlier hits
-      for (const f of files) {
-        if (!f.keepInMemory || mem.has(f.path)) continue;
-        const hit = await cache.match(f.url);
-        if (hit) {
+        if (f.keepInMemory) {
           const buf = new Uint8Array(await hit.clone().arrayBuffer());
           mem.set(f.path, buf);
         }
       }
-
-      // expose by DOS names
-      toolBufs = new Map();
-      for (const [k,v] of mem.entries()) {
-        const name = k.split('/').pop();
-        toolBufs.set(name, v);
-      }
-
-      status.textContent = 'Ready.';
-      ready = true;
-      maybeEnableStart();
     }
-
-    // ----- Editor actions -----
-    saveBtn.addEventListener('click', ()=>{
-      const name = toDos83(fileNameEl.value || 'HELLO.ASM');
-      const blob = new Blob([cm.getValue()], { type: 'text/plain' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      a.click();
-      URL.revokeObjectURL(a.href);
-    });
-
-    loadBtn.addEventListener('click', ()=> loader.click());
-    loader.addEventListener('change', async ()=>{
-      const f = loader.files && loader.files[0];
-      if (!f) return;
-      const txt = await f.text();
-      cm.setValue(txt);
-      fileNameEl.value = toDos83(f.name);
-      loader.value = '';
-      maybeEnableStart();
-    });
-
-    // ----- Assets picker (non-ASM) -----
-    const bag = new Map();
-    elInput.addEventListener('change', ()=>{
-      for (const f of Array.from(elInput.files || [])) {
-        // editor provides the .ASM, so treat all picked files as assets
-        bag.set(f.name, f);
-      }
-      refreshFileList();
-      elInput.value = '';
-    });
-    function refreshFileList(){
-      const files = Array.from(bag.values());
-      elList.innerHTML = '';
-      for (const f of files) {
-        const li = document.createElement('li');
-        li.textContent = `${f.name} → ${toDos83(f.name)}`;
-        elList.appendChild(li);
-      }
-    }
-
-    // ----- Start button enablement -----
-    function maybeEnableStart(){
-      // editor always supplies exactly one ASM; we only wait for preload readiness
-      startBtn.disabled = !ready;
-    }
-
-    // ----- Start / Reset -----
-    startBtn.addEventListener('click', async ()=>{
-      try {
-        // Build DOS filesystem from editor + cached tools + assets
-        const dosAsmName = toDos83((fileNameEl.value || 'HELLO.ASM').trim());
-        const asmBytes = encoder.encode(cm.getValue());
-
-        const initFs = [
-          { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
-          { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
-          { path: dosAsmName,  contents: asmBytes },
-          { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) },
-        ];
-        for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
-          const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
+    // misses
+    for (const f of files) {
+      const hit = await cache.match(f.url);
+      if (hit) continue;
+      const resp = await fetch(new Request(f.url, { cache:'reload' })).catch(()=>null);
+      if (!resp || !resp.ok) {
+        if (f.required) throw new Error('Network error loading ' + f.url);
+      } else {
+        cache.put(f.url, resp.clone()).catch(()=>{});
+        if (f.keepInMemory) {
+          const buf = new Uint8Array(await resp.clone().arrayBuffer());
+          mem.set(f.path, buf);
         }
-        for (const f of Array.from(bag.values())) {
-          const buf = new Uint8Array(await f.arrayBuffer());
-          initFs.push({ path: toDos83(f.name), contents: buf });
-        }
-
-        startDosWith(initFs);
-      } catch (e) {
-        console.error(e);
-        alert('Could not start emulator. See console for details.');
       }
-    });
-
-    resetBtn.addEventListener('click', ()=> location.reload());
-
-    // ----- Boot -----
-    (async ()=>{
-      await waitForCOIController().catch(()=>{});
-      try {
-        await preloadAll();
-      } catch (e) {
-        console.error(e);
-        status.textContent = 'Preload failed — check your network and hard-refresh once.';
+      done++; prog.value = done; progText.textContent = `${done}/${total}`;
+    }
+    // fill mem for hits
+    for (const f of files) {
+      if (!f.keepInMemory || mem.has(f.path)) continue;
+      const hit = await cache.match(f.url);
+      if (hit) {
+        const buf = new Uint8Array(await hit.clone().arrayBuffer());
+        mem.set(f.path, buf);
       }
-    })();
+    }
+
+    // expose DOS names
+    toolBufs = new Map();
+    for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
+
+    status.textContent = 'Ready.';
+    ready = true;
+    startBtn.disabled = false;
+  }
+
+  // Editor actions
+  saveBtn.addEventListener('click', ()=>{
+    const name = toDos83(fileNameEl.value || 'HELLO.ASM');
+    const blob = new Blob([cm.getValue()], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  loadBtn.addEventListener('click', ()=> loader.click());
+  loader.addEventListener('change', async ()=>{
+    const f = loader.files && loader.files[0];
+    if (!f) return;
+    const txt = await f.text();
+    cm.setValue(txt);
+    fileNameEl.value = toDos83(f.name);
+    loader.value = '';
+  });
+
+  // Assets
+  elInput.addEventListener('change', ()=>{
+    for (const f of Array.from(elInput.files || [])) bag.set(f.name, f);
+    refreshFileList();
+    elInput.value = '';
+  });
+
+  // Start / Reset
+  startBtn.addEventListener('click', async ()=>{
+    try {
+      const dosAsmName = toDos83((fileNameEl.value || 'HELLO.ASM').trim());
+      const asmBytes = encoder.encode(cm.getValue());
+
+      const initFs = [
+        { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
+        { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
+        { path: dosAsmName,  contents: asmBytes },
+        { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) },
+      ];
+      for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
+        const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
+      }
+      for (const f of Array.from(bag.values())) {
+        const buf = new Uint8Array(await f.arrayBuffer());
+        initFs.push({ path: toDos83(f.name), contents: buf });
+      }
+
+      startDosWith(initFs);
+    } catch (e) {
+      console.error(e);
+      alert('Could not start emulator. See console.');
+    }
+  });
+
+  resetBtn.addEventListener('click', ()=> location.reload());
+
+  // Boot
+  (async ()=>{
+    await waitForCOIController().catch(()=>{});
+    try { await preloadAll(); }
+    catch (e) { status.textContent = 'Preload failed. Try hard-refresh.'; console.error(e); }
   })();
-  </script>
+})();
+</script>
 </body>
 </html>
