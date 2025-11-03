@@ -5,7 +5,7 @@ const COOP = 'same-origin';
 const COEP = 'require-corp';
 
 // Bump this when assets change to bust cache:
-const CACHE_NAME = 'dosbox-prewarm-v5';
+const CACHE_NAME = 'dosbox-prewarm-v6';
 
 // Files to precache at install
 const PRECACHE = [
@@ -21,7 +21,7 @@ const PRECACHE = [
   'tools/TD.EXE',
   'tools/TDCONFIG.TD',
 
-  // Optional Brotli siblings (if you generated them)
+  // Optional Brotli siblings (place next to originals if you generate them)
   // 'emulators/wdosbox.wasm.br',
   // 'emulators/wdosbox.js.br',
   // 'tools/TASM.EXE.br',
