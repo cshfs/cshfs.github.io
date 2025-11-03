@@ -13,16 +13,17 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/mode/gas/gas.min.js"></script>
 
 <style>
-  :root { color-scheme: light; }
-  * { box-sizing: border-box; }
+  /* Global: pure white UI */
   html, body { height: 100%; }
   body {
-    margin: 0; background: #fff; color: #000;
+    margin: 0;
+    background: #fff;
+    color: #000;
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   }
   main { width: 100%; max-width: 980px; margin: 0 auto; padding: 12px; }
-
   h1 { margin: 0 0 12px; font-size: 20px; }
+
   section { margin: 12px 0; }
 
   /* Loading */
@@ -30,24 +31,41 @@
   #status { font-size: 14px; margin: 6px 0; }
   progress { width: 260px; height: 12px; vertical-align: middle; }
 
-  /* Controls */
+  /* Controls with strong contrast */
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
-  .btn { font: inherit; padding: 8px 12px; background: #f2f2f2; border: 1px solid #ccc; cursor: pointer; }
-  .btn[disabled]{ opacity:.6; cursor:not-allowed; }
-  input[type="text"] { font: inherit; padding: 8px; border: 1px solid #ccc; width: 220px; }
+  .btn {
+    font: inherit;
+    padding: 10px 14px;
+    background: #111;          /* high contrast */
+    color: #fff;
+    border: 2px solid #111;
+    cursor: pointer;
+  }
+  .btn:hover { background:#000; border-color:#000; }
+  .btn[disabled]{ opacity:.55; cursor:not-allowed; }
+  input[type="text"] {
+    font: inherit; padding: 8px; border: 2px solid #111; width: 240px; color:#000; background:#fff;
+  }
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-  /* Editor */
-  .CodeMirror { height: 420px; border: 1px solid #ccc; }
+  /* Editor: ensure editable, white bg, visible caret */
+  .CodeMirror {
+    height: 420px;
+    border: 2px solid #111;
+    background: #fff;
+    color: #000;
+  }
+  .CodeMirror-focused { outline: 2px solid #1115; }
+  .note { font-size: 13px; color:#333; }
 
-  /* DOSBox frame */
-  #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border: 1px solid #ccc; }
+  /* DOSBox */
+  #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border: 2px solid #111; }
   ul { margin: 6px 0 0 18px; padding: 0; }
-  .note { font-size: 13px; color:#444; }
 </style>
 
 <script>
+/* Service worker for COOP/COEP on GitHub Pages */
 (function registerCOI() {
   if (!('serviceWorker' in navigator)) return;
   const swUrl = new URL('./coi-sw.js', location.href);
@@ -98,7 +116,7 @@ main ENDP
 END main
 </textarea>
     <div class="note" style="margin-top:6px;">
-      The editor content is the single <code>.ASM</code> source. Use the picker below for extra asset files only.
+      Edit above. Press Start to assemble, link, and run. The editor content is the single <code>.ASM</code> source.
     </div>
   </section>
 
@@ -117,10 +135,12 @@ END main
 
 <script>
 (function(){
-  // ----- Editor -----
+  // ----- CodeMirror -----
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
-    lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false,
+    lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
   });
+  // Ensure it is interactable after layout
+  setTimeout(()=>{ cm.refresh(); cm.focus(); }, 0);
 
   // Elements
   const status = document.getElementById('status');
@@ -187,8 +207,7 @@ BUILD
       'echo Build failed.',
       ':END'
     ];
-    // REAL CRLFs here:
-    return encoder.encode(lines.join("\r\n") + "\r\n");
+    return encoder.encode(lines.join("\r\n") + "\r\n"); // real CRLF
   }
 
   function startDosWith(initFs){
@@ -243,7 +262,6 @@ BUILD
     let total = files.length, done = 0;
     prog.max = total; prog.value = 0; progText.textContent = `0/${total}`;
 
-    // hits
     for (const f of files) {
       const hit = await cache.match(f.url);
       if (hit) {
@@ -254,7 +272,6 @@ BUILD
         }
       }
     }
-    // misses
     for (const f of files) {
       const hit = await cache.match(f.url);
       if (hit) continue;
@@ -270,7 +287,6 @@ BUILD
       }
       done++; prog.value = done; progText.textContent = `${done}/${total}`;
     }
-    // fill mem for hits
     for (const f of files) {
       if (!f.keepInMemory || mem.has(f.path)) continue;
       const hit = await cache.match(f.url);
@@ -279,8 +295,6 @@ BUILD
         mem.set(f.path, buf);
       }
     }
-
-    // expose DOS names
     toolBufs = new Map();
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
@@ -308,6 +322,8 @@ BUILD
     cm.setValue(txt);
     fileNameEl.value = toDos83(f.name);
     loader.value = '';
+    cm.refresh();
+    cm.focus();
   });
 
   // Assets
@@ -321,7 +337,7 @@ BUILD
   startBtn.addEventListener('click', async ()=>{
     try {
       const dosAsmName = toDos83((fileNameEl.value || 'HELLO.ASM').trim());
-      const asmBytes = encoder.encode(cm.getValue());
+      const asmBytes = encoder.encode(cm.getValue());   // uses latest edits
 
       const initFs = [
         { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
