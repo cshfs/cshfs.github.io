@@ -1,20 +1,28 @@
-// coi-sw.js — COOP/COEP + navigation handling + precache + Brotli preference (GitHub Pages friendly)
+// coi-sw.js — COOP/COEP + navigation handling + Brotli preference (GitHub Pages)
+// v10
 
 const COOP = 'same-origin';
 const COEP = 'require-corp';
-const CACHE_NAME = 'dosbox-prewarm-v9';
+const CACHE_NAME = 'dosbox-prewarm-v11';
 
 const PRECACHE = [
+  // HTML / entry (serve with COOP/COEP, no long cache)
   './',
   'index.html',
-  'codemirror/codemirror.min.css',
-  'codemirror/codemirror.min.js',
-  'codemirror/gas.min.js',
+
+  // Local editor libs if you self-hosted CodeMirror
+  'codemirror.min.css',
+  'codemirror.min.js',
+  'gas.min.js',
+
+  // js-dos bundle
   'js-dos.js',
   'js-dos.css',
-  // Emulator
+
+  // Emulator core
   'emulators/wdosbox.wasm',
   'emulators/wdosbox.js',
+
   // Tools
   'tools/TASM.EXE',
   'tools/TLINK.EXE',
@@ -22,15 +30,17 @@ const PRECACHE = [
   'tools/RTM.EXE',
   'tools/TD.EXE',
   'tools/TDCONFIG.TD',
-  // Optional Brotli siblings (uncomment only if present)
-  // 'emulators/wdosbox.wasm.br',
-  // 'emulators/wdosbox.js.br',
-  // 'tools/TASM.EXE.br',
-  // 'tools/TLINK.EXE.br',
-  // 'tools/DPMI16BI.OVL.br',
-  // 'tools/RTM.EXE.br',
-  // 'tools/TD.EXE.br',
-  // 'tools/TDCONFIG.TD.br',
+
+  // OPTIONAL: Brotli siblings — include only the ones you actually uploaded
+  // (keep originals above too)
+  'emulators/wdosbox.wasm.br',
+  'emulators/wdosbox.js.br',
+  'tools/TASM.EXE.br',
+  'tools/TLINK.EXE.br',
+  'tools/DPMI16BI.OVL.br',
+  'tools/RTM.EXE.br',
+  'tools/TD.EXE.br',
+  'tools/TDCONFIG.TD.br',
 ];
 
 self.addEventListener('install', (event) => {
@@ -52,6 +62,7 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+// Map “original path -> .br path” so we can prefer Brotli when present.
 const BR_MAP = {
   'emulators/wdosbox.wasm': 'emulators/wdosbox.wasm.br',
   'emulators/wdosbox.js':   'emulators/wdosbox.js.br',
@@ -63,28 +74,32 @@ const BR_MAP = {
   'tools/TDCONFIG.TD':      'tools/TDCONFIG.TD.br',
 };
 
-function withHeaders(resp, extra = {}) {
-  const headers = new Headers(resp.headers);
-  headers.set('Cross-Origin-Opener-Policy', COOP);
-  headers.set('Cross-Origin-Embedder-Policy', COEP);
-  if (extra.contentType) headers.set('Content-Type', extra.contentType);
-  if (extra.contentEncoding) headers.set('Content-Encoding', extra.contentEncoding);
-  if (!extra.noCacheControl) headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-  return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+function withHeaders(resp, {contentType, contentEncoding, noCacheControl} = {}) {
+  const h = new Headers(resp.headers);
+  h.set('Cross-Origin-Opener-Policy', COOP);
+  h.set('Cross-Origin-Embedder-Policy', COEP);
+  if (contentType) h.set('Content-Type', contentType);
+  if (contentEncoding) h.set('Content-Encoding', contentEncoding);
+  if (!noCacheControl) h.set('Cache-Control', 'public, max-age=31536000, immutable');
+  return new Response(resp.body, {status: resp.status, statusText: resp.statusText, headers: h});
 }
 
-async function brOrNormal(cache, req) {
+async function matchBrOrNormal(cache, req) {
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\//, '');
   const br = BR_MAP[path];
+
+  // Prefer .br when we have it cached
   if (br) {
     const brURL = new URL(url.origin + '/' + br);
     const brHit = await cache.match(brURL.href);
     if (brHit) {
-      const ct = path.endsWith('.wasm') ? 'application/wasm'
-               : path.endsWith('.js')   ? 'application/javascript'
-               : (brHit.headers.get('Content-Type') || 'application/octet-stream');
-      return withHeaders(brHit, { contentType: ct, contentEncoding: 'br' });
+      const ct =
+        path.endsWith('.wasm') ? 'application/wasm' :
+        path.endsWith('.js')   ? 'application/javascript' :
+        path.endsWith('.css')  ? 'text/css; charset=utf-8' :
+        'application/octet-stream';
+      return withHeaders(brHit, {contentType: ct, contentEncoding: 'br'});
     }
   }
   const hit = await cache.match(req);
@@ -97,15 +112,15 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  // Serve navigations (HTML) with headers applied
+  // 1) Navigations (HTML): network-first so updates show; always add COOP/COEP; no long cache.
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_NAME);
       try {
-        const netResp = await fetch(req);
-        if (netResp && netResp.ok) {
-          cache.put(req, netResp.clone()).catch(()=>{});
-          return withHeaders(netResp, { noCacheControl: true, contentType: 'text/html; charset=utf-8' });
+        const net = await fetch(req);
+        if (net && net.ok) {
+          cache.put(req, net.clone()).catch(()=>{});
+          return withHeaders(net, { noCacheControl: true, contentType: 'text/html; charset=utf-8' });
         }
       } catch {}
       const fallback = await cache.match('index.html') || await cache.match('./');
@@ -116,17 +131,25 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first, prefer .br
+  // 2) Static assets: cache-first; prefer .br when available; add COOP/COEP + long cache.
   event.respondWith((async () => {
     const cache = await caches.open(CACHE_NAME);
-    const cached = await brOrNormal(cache, req);
+    const cached = await matchBrOrNormal(cache, req);
     if (cached) return cached;
 
+    // Miss: fetch normal, cache, serve with headers.
     let resp = await fetch(req).catch(()=>null);
     if (resp && resp.ok && req.method === 'GET') {
       cache.put(req, resp.clone()).catch(()=>{});
     }
     if (!resp) resp = new Response('Network error', { status: 502 });
-    return withHeaders(resp);
+    // Guess content-type for a few common types (optional)
+    const path = url.pathname;
+    const ct =
+      path.endsWith('.wasm') ? 'application/wasm' :
+      path.endsWith('.js')   ? 'application/javascript' :
+      path.endsWith('.css')  ? 'text/css; charset=utf-8' :
+      undefined;
+    return withHeaders(resp, { contentType: ct });
   })());
 });
