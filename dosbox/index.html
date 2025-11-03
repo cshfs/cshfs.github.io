@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DOSBox Editor → Run</title>
+  <title>DOSBox — Editor + Run</title>
 
-  <!-- Local js-dos -->
+  <!-- Local js-dos bundle -->
   <link rel="stylesheet" href="js-dos.css" />
   <script src="js-dos.js"></script>
 
@@ -21,52 +21,45 @@
     body {
       margin: 0; background: #fff; color: #111;
       font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      display: grid; place-items: start center;
+      display: block;
     }
-    main { width: 100%; max-width: 1100px; padding: 16px; }
+    main { width: 100%; max-width: 1100px; margin: 0 auto; padding: 16px; }
     h1 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
 
-    .toolbar { display:flex; gap:8px; align-items:center; margin: 10px 0 8px; }
-    .toolbar input[type="text"] {
-      font: inherit; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px; width: 220px;
+    /* Loading strip */
+    #loading {
+      border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 16px;
+      background: #fafafa;
     }
+    #status { font-size: 13px; color: #374151; margin-bottom: 6px; }
+    #progWrap { display: flex; align-items: center; gap: 8px; }
+    progress { width: 280px; height: 12px; }
+
+    /* Editor section */
+    section { margin-bottom: 18px; }
+    .panel { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+    .panel h2 { margin: 0 0 10px; font-size: 16px; font-weight: 600; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 10px; }
     .btn {
       font: inherit; font-size: 14px; padding: 10px 14px; border-radius: 8px;
       border: 1px solid #e5e7eb; background: #f8fafc; color: #111; cursor: pointer;
     }
     .btn[disabled]{ opacity:.6; cursor:not-allowed; }
-
+    input[type="text"] {
+      font: inherit; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px; width: 220px;
+    }
+    label.file { position: relative; }
+    label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
     .cm-wrap { border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
-    .CodeMirror { height: 520px; max-width: 1000px; }
+    .CodeMirror { height: 440px; }
 
-    #bgPrep { font-size: 13px; color: #374151; margin-top: 8px; }
-
-    /* Modal (floating pane) */
-    .modal-overlay {
-      position: fixed; inset: 0; display: none;
-      align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.4); z-index: 99999;
-    }
-    .modal-overlay.open { display: flex; }
-    .modal {
-      width: min(1000px, 96vw);
-      background: #fff; border-radius: 10px; border: 1px solid #e5e7eb;
-      padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.25);
-      max-height: 96vh; display: flex; flex-direction: column; gap: 8px;
-    }
-    .modal .header { display:flex; align-items:center; justify-content: space-between; }
-    .modal h2 { margin: 0; font-size: 16px; font-weight: 600; }
-    .modal .actions { display:flex; gap:8px; align-items:center; }
-    .status-line { font-size:13px; color:#374151; display:flex; align-items:center; gap:8px; }
-    .error-line { font-size:13px; color:#b91c1c; display:none; }
-    .error-line.show { display:block; }
-
+    /* Emulator section */
     #dosbox {
       width: 100%; aspect-ratio: 1050/600;
-      background:#000; border: 1px solid #e5e7eb;
+      border: 1px solid #e5e7eb; background:#000;
     }
-    .inline-load { display:flex; gap:8px; align-items:center; }
-    progress { width: 240px; height: 12px; }
+    ul { margin: 8px 0 0; padding-left: 18px; }
+    .muted { font-size: 12px; color:#6b7280; }
   </style>
 
   <!-- Register SW early (COOP/COEP + caching). Reload once when ready. -->
@@ -86,15 +79,27 @@
 </head>
 <body>
   <main>
-    <h1>Editor</h1>
+    <!-- Loading screen -->
+    <section id="loading" class="panel">
+      <div id="status">Preparing emulator…</div>
+      <div id="progWrap">
+        <progress id="prog" value="0" max="100"></progress>
+        <span id="progText"></span>
+      </div>
+      <div id="coiNote" class="muted" style="margin-top:6px;"></div>
+    </section>
 
-    <div class="toolbar">
-      <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
-      <button id="runBtn" class="btn" type="button">Run file</button>
-    </div>
-
-    <div class="cm-wrap">
-      <textarea id="editorTA">; 16-bit DOS example for TASM/TLINK
+    <!-- Editor -->
+    <section class="panel" id="editorPanel">
+      <h2>Editor</h2>
+      <div class="row">
+        <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
+        <button id="saveBtn" class="btn" type="button">Download .ASM</button>
+        <button id="loadBtn" class="btn" type="button">Load .ASM into editor</button>
+        <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
+      </div>
+      <div class="cm-wrap">
+        <textarea id="editorTA">; 16-bit DOS example for TASM/TLINK
 .MODEL  small
 .STACK  100h
 .DATA
@@ -111,68 +116,59 @@ main PROC
 main ENDP
 END main
 </textarea>
-    </div>
-
-    <div id="bgPrep">Preparing emulator in the background…</div>
-  </main>
-
-  <!-- Floating pane (modal) -->
-  <div id="overlay" class="modal-overlay" role="dialog" aria-modal="true" aria-hidden="true">
-    <div class="modal">
-      <div class="header">
-        <h2>DOSBox</h2>
-        <div class="actions">
-          <button id="rerunBtn" class="btn" type="button" title="Re-run with current editor buffer">Re-run</button>
-          <button id="closeBtn" class="btn" type="button">Close</button>
-        </div>
       </div>
+      <p class="muted" style="margin-top:8px;">
+        Tip: The editor content is used as the single <code>.ASM</code> source. Use the assets picker below for extra files (images/data, etc.).
+      </p>
+    </section>
 
-      <!-- status / errors -->
-      <div class="status-line">
-        <div id="inlineLoader" class="inline-load" style="display:none;">
-          <span id="inlineStatus">Loading emulator…</span>
-          <progress id="inlineProg" value="0" max="100"></progress>
-          <span id="inlineText"></span>
-        </div>
-        <div id="inlineReady" style="display:none;">Ready.</div>
+    <!-- Emulator -->
+    <section class="panel" id="emuPanel">
+      <h2>Emulator</h2>
+      <div class="row">
+        <label class="file btn">Choose extra asset files
+          <input id="fileInput" type="file" multiple />
+        </label>
+        <button id="startBtn" class="btn" type="button" disabled>Start</button>
+        <button id="resetBtn" class="btn" type="button">Reset</button>
       </div>
-      <div id="inlineError" class="error-line"></div>
-
       <div id="dosbox" aria-label="DOSBox frame"></div>
-    </div>
-  </div>
+      <ul id="fileList"></ul>
+    </section>
+  </main>
 
   <script>
   (function(){
-    console.log('[init] page script start');
-
-    // --- CodeMirror
+    // ----- CodeMirror -----
     const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
       lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false,
     });
 
-    // --- Elements
-    const runBtn = document.getElementById('runBtn');
+    // ----- Elements -----
+    const status = document.getElementById('status');
+    const prog = document.getElementById('prog');
+    const progText = document.getElementById('progText');
+    const coiNote = document.getElementById('coiNote');
+
     const fileNameEl = document.getElementById('fileName');
-    const overlay = document.getElementById('overlay');
-    const closeBtn = document.getElementById('closeBtn');
-    const rerunBtn = document.getElementById('rerunBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const loadBtn = document.getElementById('loadBtn');
+    const loader = document.getElementById('loader');
+
     const elDos = document.getElementById('dosbox');
-    const bgPrep = document.getElementById('bgPrep');
+    const elInput = document.getElementById('fileInput');
+    const elList = document.getElementById('fileList');
+    const startBtn = document.getElementById('startBtn');
+    const resetBtn = document.getElementById('resetBtn');
 
-    const inlineLoader = document.getElementById('inlineLoader');
-    const inlineStatus = document.getElementById('inlineStatus');
-    const inlineProg = document.getElementById('inlineProg');
-    const inlineText = document.getElementById('inlineText');
-    const inlineReady = document.getElementById('inlineReady');
-    const inlineError = document.getElementById('inlineError');
-
+    // ----- State -----
     const encoder = new TextEncoder();
-    let player = null;
-    let preloadDone = false;
+    const CACHE_NAME = 'dosbox-prewarm-v8'; // keep in sync with coi-sw.js
     let toolBufs = new Map(); // DOS filename -> Uint8Array
-    const CACHE_NAME = 'dosbox-prewarm-v6';
+    let player = null;
+    let ready = false;
 
+    // ----- Helpers -----
     const toDos83 = (name)=>{
       const i = name.lastIndexOf('.');
       let b = (i>=0?name.slice(0,i):name).toUpperCase();
@@ -212,16 +208,12 @@ BUILD
         'echo Build failed.',
         ':END'
       ];
-      return encoder.encode(lines.join("\r\n") + "\r\n");
+      return encoder.encode(lines.join("\\r\\n") + "\\r\\n");
     }
 
     function startDosWith(initFs){
-      console.log('[dos] startDosWith initFs entries:', initFs.length);
       if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
       elDos.innerHTML = '';
-      if (!window.Dos) {
-        throw new Error('js-dos not loaded (window.Dos is undefined)');
-      }
       player = window.Dos(elDos, {
         pathPrefix: "emulators/",
         dosboxConf: DOS_CONF,
@@ -233,118 +225,19 @@ BUILD
       });
     }
 
-    async function waitForCOIController(timeoutMs=7000){
+    async function waitForCOIController(timeoutMs=8000){
       const t0 = performance.now();
       while (performance.now() - t0 < timeoutMs) {
-        if (navigator.serviceWorker?.controller) {
-          // Some browsers may take time to set crossOriginIsolated; don’t hard fail immediately.
-          if (self.crossOriginIsolated) return;
-        }
+        if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
         await new Promise(r=>setTimeout(r,120));
       }
-      // At this point, SW likely not active or COI failed.
-      console.warn('[coi] Not crossOriginIsolated yet.');
-      // We’ll proceed; js-dos may still work (depending on build). If it fails, we show inline error.
+      // Not fatal; js-dos may still start on some builds, but we surface a hint.
+      coiNote.textContent = 'Note: page is not cross-origin isolated yet. If Start fails, hard-refresh once.';
     }
 
-    function openModal(){
-      overlay.classList.add('open');
-      overlay.setAttribute('aria-hidden','false');
-    }
-    function closeModal(){
-      overlay.classList.remove('open');
-      overlay.setAttribute('aria-hidden','true');
-    }
-
-    function showInlineLoader(label, done, total){
-      inlineError.classList.remove('show');
-      inlineReady.style.display = 'none';
-      inlineLoader.style.display = 'flex';
-      inlineStatus.textContent = label || 'Loading…';
-      if (typeof done === 'number' && typeof total === 'number') {
-        inlineProg.max = total; inlineProg.value = done; inlineText.textContent = `${done}/${total}`;
-      } else {
-        inlineText.textContent = '';
-      }
-    }
-    function hideInlineLoaderShowReady(){
-      inlineLoader.style.display = 'none';
-      inlineError.classList.remove('show');
-      inlineReady.style.display = 'block';
-      inlineReady.textContent = 'Ready.';
-    }
-    function showInlineError(msg){
-      inlineLoader.style.display = 'none';
-      inlineReady.style.display = 'none';
-      inlineError.textContent = 'Error: ' + msg;
-      inlineError.classList.add('show');
-    }
-
-    // Background preloader (silent text line updates only)
-    async function backgroundPreload() {
-      console.log('[preload] background start');
-      try {
-        await waitForCOIController().catch(()=>{});
-        const files = [
-          { path:'emulators/wdosbox.wasm', url:'emulators/wdosbox.wasm', required:true,  keepInMemory:false },
-          { path:'emulators/wdosbox.js',   url:'emulators/wdosbox.js',   required:false, keepInMemory:false },
-          { path:'TASM.EXE',     url:'tools/TASM.EXE',     required:true,  keepInMemory:true },
-          { path:'TLINK.EXE',    url:'tools/TLINK.EXE',    required:true,  keepInMemory:true },
-          { path:'DPMI16BI.OVL', url:'tools/DPMI16BI.OVL', required:false, keepInMemory:true },
-          { path:'RTM.EXE',      url:'tools/RTM.EXE',      required:false, keepInMemory:true },
-          { path:'TD.EXE',       url:'tools/TD.EXE',       required:false, keepInMemory:true },
-          { path:'TDCONFIG.TD',  url:'tools/TDCONFIG.TD',  required:false, keepInMemory:true },
-        ];
-        const cache = await caches.open(CACHE_NAME);
-        const mem = new Map();
-
-        // Cache hits -> fill memory for tools
-        for (const f of files) {
-          const hit = await cache.match(f.url);
-          if (hit && f.keepInMemory) {
-            const buf = new Uint8Array(await hit.clone().arrayBuffer());
-            mem.set(f.path, buf);
-          }
-        }
-        // Fetch misses
-        for (const f of files) {
-          const hit = await cache.match(f.url);
-          if (hit) continue;
-          const resp = await fetch(new Request(f.url, { cache:'reload' })).catch(()=>null);
-          if (resp && resp.ok) {
-            cache.put(f.url, resp.clone()).catch(()=>{});
-            if (f.keepInMemory) {
-              const buf = new Uint8Array(await resp.clone().arrayBuffer());
-              mem.set(f.path, buf);
-            }
-          }
-        }
-        // Ensure memory has all wanted tools (from hits)
-        for (const f of files) {
-          if (!f.keepInMemory || mem.has(f.path)) continue;
-          const hit = await cache.match(f.url);
-          if (hit) {
-            const buf = new Uint8Array(await hit.clone().arrayBuffer());
-            mem.set(f.path, buf);
-          }
-        }
-        toolBufs = new Map();
-        for (const [k,v] of mem.entries()){
-          toolBufs.set(k.split('/').pop(), v);
-        }
-        preloadDone = true;
-        bgPrep.textContent = 'Emulator prepared.';
-        console.log('[preload] background complete');
-      } catch (e) {
-        console.warn('[preload] background failed:', e);
-        // continue; foreground will handle on demand
-      }
-    }
-
-    // Foreground preload with visible progress if needed
-    async function ensurePreloadedInline(){
-      if (preloadDone) { hideInlineLoaderShowReady(); return; }
-
+    // ----- Preload everything with file-count progress -----
+    async function preloadAll(){
+      status.textContent = 'Caching emulator and tools…';
       const files = [
         { path:'emulators/wdosbox.wasm', url:'emulators/wdosbox.wasm', required:true,  keepInMemory:false },
         { path:'emulators/wdosbox.js',   url:'emulators/wdosbox.js',   required:false, keepInMemory:false },
@@ -359,26 +252,26 @@ BUILD
       const mem = new Map();
 
       let total = files.length, done = 0;
-      showInlineLoader('Preparing emulator…', done, total);
+      prog.max = total; prog.value = 0; progText.textContent = `0/${total}`;
 
-      // hits
+      // Cache hits first
       for (const f of files) {
         const hit = await cache.match(f.url);
         if (hit) {
-          done++; showInlineLoader('Preparing emulator…', done, total);
+          done++; prog.value = done; progText.textContent = `${done}/${total}`;
           if (f.keepInMemory) {
             const buf = new Uint8Array(await hit.clone().arrayBuffer());
             mem.set(f.path, buf);
           }
         }
       }
-      // misses
+      // Fetch misses
       for (const f of files) {
         const hit = await cache.match(f.url);
         if (hit) continue;
         const resp = await fetch(new Request(f.url, { cache:'reload' })).catch(()=>null);
         if (!resp || !resp.ok) {
-          if (f.required) { showInlineError('Network error loading required files.'); throw new Error('required'); }
+          if (f.required) throw new Error('Network error loading ' + f.url);
         } else {
           cache.put(f.url, resp.clone()).catch(()=>{});
           if (f.keepInMemory) {
@@ -386,9 +279,9 @@ BUILD
             mem.set(f.path, buf);
           }
         }
-        done++; showInlineLoader('Preparing emulator…', done, total);
+        done++; prog.value = done; progText.textContent = `${done}/${total}`;
       }
-      // fill mem from hits if needed
+      // Fill mem for earlier hits
       for (const f of files) {
         if (!f.keepInMemory || mem.has(f.path)) continue;
         const hit = await cache.match(f.url);
@@ -397,22 +290,73 @@ BUILD
           mem.set(f.path, buf);
         }
       }
+
+      // expose by DOS names
       toolBufs = new Map();
-      for (const [k,v] of mem.entries()){
-        toolBufs.set(k.split('/').pop(), v);
+      for (const [k,v] of mem.entries()) {
+        const name = k.split('/').pop();
+        toolBufs.set(name, v);
       }
-      preloadDone = true;
-      hideInlineLoaderShowReady();
+
+      status.textContent = 'Ready.';
+      ready = true;
+      maybeEnableStart();
     }
 
-    async function runCurrentBuffer(){
-      try {
-        await waitForCOIController().catch(()=>{});
-        await ensurePreloadedInline();
+    // ----- Editor actions -----
+    saveBtn.addEventListener('click', ()=>{
+      const name = toDos83(fileNameEl.value || 'HELLO.ASM');
+      const blob = new Blob([cm.getValue()], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
 
-        const nm = (fileNameEl.value || 'HELLO.ASM').trim();
-        const dosAsmName = toDos83(nm);
-        const asmBytes = new TextEncoder().encode(cm.getValue());
+    loadBtn.addEventListener('click', ()=> loader.click());
+    loader.addEventListener('change', async ()=>{
+      const f = loader.files && loader.files[0];
+      if (!f) return;
+      const txt = await f.text();
+      cm.setValue(txt);
+      fileNameEl.value = toDos83(f.name);
+      loader.value = '';
+      maybeEnableStart();
+    });
+
+    // ----- Assets picker (non-ASM) -----
+    const bag = new Map();
+    elInput.addEventListener('change', ()=>{
+      for (const f of Array.from(elInput.files || [])) {
+        // editor provides the .ASM, so treat all picked files as assets
+        bag.set(f.name, f);
+      }
+      refreshFileList();
+      elInput.value = '';
+    });
+    function refreshFileList(){
+      const files = Array.from(bag.values());
+      elList.innerHTML = '';
+      for (const f of files) {
+        const li = document.createElement('li');
+        li.textContent = `${f.name} → ${toDos83(f.name)}`;
+        elList.appendChild(li);
+      }
+    }
+
+    // ----- Start button enablement -----
+    function maybeEnableStart(){
+      // editor always supplies exactly one ASM; we only wait for preload readiness
+      startBtn.disabled = !ready;
+    }
+
+    // ----- Start / Reset -----
+    startBtn.addEventListener('click', async ()=>{
+      try {
+        // Build DOS filesystem from editor + cached tools + assets
+        const dosAsmName = toDos83((fileNameEl.value || 'HELLO.ASM').trim());
+        const asmBytes = encoder.encode(cm.getValue());
 
         const initFs = [
           { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
@@ -423,26 +367,30 @@ BUILD
         for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
           const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
         }
+        for (const f of Array.from(bag.values())) {
+          const buf = new Uint8Array(await f.arrayBuffer());
+          initFs.push({ path: toDos83(f.name), contents: buf });
+        }
 
         startDosWith(initFs);
       } catch (e) {
-        console.error('[run] failed:', e);
-        showInlineError(e && e.message ? e.message : String(e));
+        console.error(e);
+        alert('Could not start emulator. See console for details.');
       }
-    }
-
-    // Wire up
-    runBtn.addEventListener('click', ()=>{
-      openModal();
-      // show loader immediately (prevents “just dark overlay”)
-      showInlineLoader('Preparing emulator…');
-      setTimeout(()=>{ runCurrentBuffer(); }, 0);
     });
-    rerunBtn.addEventListener('click', ()=>{ showInlineLoader('Rebuilding…'); runCurrentBuffer(); });
-    closeBtn.addEventListener('click', ()=>{ closeModal(); });
 
-    // Background prep
-    backgroundPreload();
+    resetBtn.addEventListener('click', ()=> location.reload());
+
+    // ----- Boot -----
+    (async ()=>{
+      await waitForCOIController().catch(()=>{});
+      try {
+        await preloadAll();
+      } catch (e) {
+        console.error(e);
+        status.textContent = 'Preload failed — check your network and hard-refresh once.';
+      }
+    })();
   })();
   </script>
 </body>
