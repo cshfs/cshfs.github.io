@@ -17,7 +17,7 @@
 <style>
   /* Pure white everywhere */
   html, body { height: 100%; background:#fff; }
-  body { margin: 0; color:#000; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+  body { margin: 0; color:#000; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
 
   /* Wider page so editor isn't cramped */
   main { width: min(1280px, 95vw); margin: 0 auto; padding: 12px; background:#fff; }
@@ -29,13 +29,13 @@
   #status { font-size: 14px; margin: 6px 0; }
   progress { width: 260px; height: 12px; vertical-align: middle; }
 
-  /* Full-height workspace with padding so bottom buttons aren't cut */
+  /* Full-height workspace with generous bottom safety so buttons never cut off */
   #workspace {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding-bottom: 24px;
+    padding-bottom: 140px; /* keep in sync with JS SAFE */
     margin-bottom: env(safe-area-inset-bottom, 0px);
   }
 
@@ -137,17 +137,14 @@ END main
 
 <script>
 (function(){
-  // ----- persistence keys -----
   const LS_KEY_NAME = 'dos_editor_name_v1';
   const LS_KEY_TEXT = 'dos_editor_text_v1';
 
-  // ----- CodeMirror -----
   const workspace = document.getElementById('workspace');
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
   });
 
-  // Elements
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
   const progText = document.getElementById('progText');
@@ -166,40 +163,33 @@ END main
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
 
-  // State
   const encoder = new TextEncoder();
-  const CACHE_NAME = 'dosbox-prewarm-v10'; // keep in sync with SW if bumped
+  const CACHE_NAME = 'dosbox-prewarm-v10';
   let toolBufs = new Map();
   let player = null;
-  let ready = false;
-  const bag = new Map(); // asset files
+  const bag = new Map();
 
-  // Load persisted editor state (if any)
   const savedName = localStorage.getItem(LS_KEY_NAME);
   const savedText = localStorage.getItem(LS_KEY_TEXT);
   if (savedName) fileNameEl.value = savedName;
   if (savedText) cm.setValue(savedText);
 
-  // Resize editor to fill viewport height without cutting buttons
   const nameRow = document.getElementById('nameRow');
   const topControls = document.getElementById('topControls');
   function resizeEditor() {
+    const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    const SAFE = 140; // must match CSS padding-bottom
     const loadingH = (loadingBox && loadingBox.offsetParent !== null) ? loadingBox.offsetHeight : 0;
-    const target = Math.max(
-      200,
-      window.innerHeight
-      - loadingH
-      - (nameRow ? nameRow.offsetHeight : 0)
-      - (topControls ? topControls.offsetHeight : 0)
-      - 36
-    );
+    const nameH = nameRow ? nameRow.offsetHeight : 0;
+    const ctrlH = topControls ? topControls.offsetHeight : 0;
+    const target = Math.max(200, vh - loadingH - nameH - ctrlH - SAFE);
     cm.setSize(null, target);
     cm.refresh();
   }
   window.addEventListener('resize', resizeEditor);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeEditor);
   setTimeout(resizeEditor, 0);
 
-  // Helpers
   const toDos83 = (name)=>{
     const i = name.lastIndexOf('.');
     let b = (i>=0?name.slice(0,i):name).toUpperCase();
@@ -239,7 +229,7 @@ BUILD
       'echo Build failed.',
       ':END'
     ];
-    return encoder.encode(lines.join("\r\n") + "\r\n"); // CRLF
+    return encoder.encode(lines.join("\r\n") + "\r\n");
   }
 
   function startDosWith(initFs){
@@ -275,7 +265,6 @@ BUILD
     }
   }
 
-  // Preload emulator + tools (file-count progress)
   async function preloadAll(){
     status.textContent = 'Caching emulator and tools…';
     const files = [
@@ -330,16 +319,12 @@ BUILD
     toolBufs = new Map();
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
-    // Hide loading once ready & enable Start
     document.getElementById('loading').style.display = 'none';
-    ready = true;
     startBtn.disabled = false;
 
-    // After loading strip collapses, recalc editor height
-    resizeEditor();
+    resizeEditor(); // recalc after loading strip collapses
   }
 
-  // Editor actions
   saveBtn.addEventListener('click', ()=>{
     const name = toDos83(fileNameEl.value || 'HELLO.ASM');
     const blob = new Blob([cm.getValue()], { type: 'text/plain' });
@@ -363,22 +348,18 @@ BUILD
     cm.focus();
   });
 
-  // Assets
   elInput.addEventListener('change', ()=>{
     for (const f of Array.from(elInput.files || [])) bag.set(f.name, f);
     refreshFileList();
     elInput.value = '';
   });
 
-  // Start
   startBtn.addEventListener('click', async ()=>{
     try {
       const nameRaw = (fileNameEl.value || 'HELLO.ASM').trim();
-      // Persist editor state
       localStorage.setItem(LS_KEY_NAME, nameRaw);
       localStorage.setItem(LS_KEY_TEXT, cm.getValue());
 
-      // Grey-out editor and disable Start
       cm.setOption('readOnly', true);
       workspace.classList.add('cm-locked');
       startBtn.disabled = true;
@@ -403,7 +384,6 @@ BUILD
 
       startDosWith(initFs);
 
-      // Smooth-scroll to the DOSBox section after kicking it off
       setTimeout(()=> {
         emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 50);
@@ -413,13 +393,11 @@ BUILD
     }
   });
 
-  // Stop: scroll to top, then reload
   stopBtn.addEventListener('click', ()=>{
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setTimeout(()=>location.reload(), 250);
   });
 
-  // Boot
   (async ()=>{
     await waitForCOIController().catch(()=>{});
     try { await preloadAll(); }
