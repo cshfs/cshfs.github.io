@@ -5,12 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>DOSBox — Editor + Run</title>
 
+<!-- js-dos (local) -->
 <link rel="stylesheet" href="js-dos.css" />
 <script src="js-dos.js"></script>
 
-<link rel="stylesheet" href="codemirror.min.css">
-<script src="codemirror.min.js"></script>
-<script src="gas.min.js"></script>
+<!-- CodeMirror 5 (switch to your local files if you self-hosted) -->
+<link rel="stylesheet" href="codemirror/codemirror.min.css">
+<script src="codemirror/codemirror.min.js"></script>
+<script src="codemirror/gas.min.js"></script>
 
 <style>
   /* Pure white everywhere */
@@ -21,32 +23,46 @@
   }
   main { width: 100%; max-width: 980px; margin: 0 auto; padding: 12px; background:#fff; }
   section { margin: 12px 0; background:#fff; }
-  h1 { margin: 0 0 12px; font-size: 20px; }
+  h1 { display:none; } /* titles removed */
 
-  /* Loading */
+  /* Loading strip */
   #loading { padding: 8px 0; background:#fff; }
   #status { font-size: 14px; margin: 6px 0; }
   progress { width: 260px; height: 12px; vertical-align: middle; }
 
-  /* Controls with high contrast */
-  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  /* Workspace fills the full viewport height */
+  #workspace {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Controls (high contrast) */
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .btn {
     font: inherit; padding: 10px 14px;
     background:#111; color:#fff; border:2px solid #111; cursor:pointer;
   }
   .btn:hover { background:#000; border-color:#000; }
   .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
-  input[type="text"] { font: inherit; padding: 8px; border:2px solid #111; width: 240px; background:#fff; color:#000; }
+  input[type="text"] {
+    font: inherit; padding: 8px; border:2px solid #111; width: 240px; background:#fff; color:#000;
+  }
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-  /* Editor */
-  .CodeMirror { height: 420px; border:2px solid #111; background:#fff; color:#000; transition: opacity .15s ease; }
+  /* Editor grows to fill remaining viewport in the workspace */
+  .editor-wrap { flex: 1; min-height: 0; display: flex; }
+  .CodeMirror {
+    height: 100%; width: 100%;
+    border:2px solid #111; background:#fff; color:#000;
+    transition: opacity .15s ease;
+  }
   .CodeMirror-focused { outline: 2px solid #1115; }
   .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
-  .note { font-size: 13px; color:#333; background:#fff; }
 
-  /* DOSBox */
+  /* DOSBox section */
   #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border:2px solid #111; }
   ul { margin: 6px 0 0 18px; padding: 0; background:#fff; }
 
@@ -79,19 +95,20 @@
     <div id="status">Preparing emulator…</div>
     <progress id="prog" value="0" max="100"></progress>
     <span id="progText"></span>
-    <div id="coiNote" class="note"></div>
+    <div id="coiNote" style="font-size:13px;color:#333;"></div>
   </section>
 
-  <!-- Editor -->
-  <section id="editorSection">
-    <h1>Editor</h1>
+  <!-- Full-height workspace: controls + editor + top buttons (including assets/start/stop) -->
+  <section id="workspace">
     <div class="row">
       <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
       <button id="saveBtn" class="btn" type="button">Download .ASM</button>
       <button id="loadBtn" class="btn" type="button">Load .ASM</button>
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
     </div>
-    <textarea id="editorTA">; 16-bit DOS example for TASM/TLINK
+
+    <div class="editor-wrap">
+      <textarea id="editorTA">; 16-bit DOS example for TASM/TLINK
 .MODEL  small
 .STACK  100h
 .DATA
@@ -108,19 +125,17 @@ main PROC
 main ENDP
 END main
 </textarea>
-    <div class="note" style="margin-top:6px;">
-      Edit above. Press Start to assemble, link, and run. The editor content is the single <code>.ASM</code> source.
     </div>
-  </section>
 
-  <!-- Emulator -->
-  <section>
-    <h1>Emulator</h1>
-    <div class="row">
+    <div class="row" id="topControls">
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
       <button id="startBtn" class="btn" type="button" disabled>Start</button>
       <button id="stopBtn" class="btn" type="button">Stop</button>
     </div>
+  </section>
+
+  <!-- DOSBox area (below the fold) -->
+  <section id="emuSection">
     <div id="dosbox" aria-label="DOSBox frame"></div>
     <ul id="fileList"></ul>
   </section>
@@ -133,7 +148,7 @@ END main
   const LS_KEY_TEXT = 'dos_editor_text_v1';
 
   // ----- CodeMirror -----
-  const cmRoot = document.getElementById('editorSection');
+  const workspace = document.getElementById('workspace');
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
   });
@@ -152,6 +167,7 @@ END main
   const loader = document.getElementById('loader');
 
   const elDos = document.getElementById('dosbox');
+  const emuSection = document.getElementById('emuSection');
   const elInput = document.getElementById('fileInput');
   const elList = document.getElementById('fileList');
   const startBtn = document.getElementById('startBtn');
@@ -159,7 +175,7 @@ END main
 
   // State
   const encoder = new TextEncoder();
-  const CACHE_NAME = 'dosbox-prewarm-v8';
+  const CACHE_NAME = 'dosbox-prewarm-v10'; /* keep in sync with SW if you bumped it */
   let toolBufs = new Map();
   let player = null;
   let ready = false;
@@ -247,7 +263,7 @@ BUILD
     }
   }
 
-  // Preload emulator + tools
+  // Preload emulator + tools (file-count progress); hide strip when ready
   async function preloadAll(){
     status.textContent = 'Caching emulator and tools…';
     const files = [
@@ -264,8 +280,6 @@ BUILD
     const mem = new Map();
 
     let total = files.length, done = 0;
-    const prog = document.getElementById('prog');
-    const progText = document.getElementById('progText');
     prog.max = total; prog.value = 0; progText.textContent = `0/${total}`;
 
     for (const f of files) {
@@ -304,14 +318,14 @@ BUILD
     toolBufs = new Map();
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
-    // Hide loading strip when ready
-    document.getElementById('loading').style.display = 'none';
+    // Hide loading once ready & enable Start
+    loadingBox.style.display = 'none';
     ready = true;
     startBtn.disabled = false;
   }
 
   // Editor actions
-  document.getElementById('saveBtn').addEventListener('click', ()=>{
+  saveBtn.addEventListener('click', ()=>{
     const name = toDos83(fileNameEl.value || 'HELLO.ASM');
     const blob = new Blob([cm.getValue()], { type: 'text/plain' });
     const a = document.createElement('a');
@@ -333,7 +347,7 @@ BUILD
     cm.focus();
   });
 
-  // Assets
+  // Assets (now located in the top workspace too)
   elInput.addEventListener('change', ()=>{
     for (const f of Array.from(elInput.files || [])) bag.set(f.name, f);
     refreshFileList();
@@ -343,14 +357,14 @@ BUILD
   // Start
   startBtn.addEventListener('click', async ()=>{
     try {
-      // Persist editor state
       const nameRaw = (fileNameEl.value || 'HELLO.ASM').trim();
+      // Persist editor state
       localStorage.setItem(LS_KEY_NAME, nameRaw);
       localStorage.setItem(LS_KEY_TEXT, cm.getValue());
 
       // Grey-out editor and disable Start
       cm.setOption('readOnly', true);
-      cmRoot.classList.add('cm-locked');
+      workspace.classList.add('cm-locked');
       startBtn.disabled = true;
       startBtn.classList.add('disabled');
 
@@ -372,6 +386,11 @@ BUILD
       }
 
       startDosWith(initFs);
+
+      // Smooth-scroll to the DOSBox section after kicking it off
+      setTimeout(()=> {
+        emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
     } catch (e) {
       console.error(e);
       alert('Could not start emulator. See console.');
