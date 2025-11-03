@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DOSBox Editor → Run</title>
 
-  <!-- Local js-dos (keep these files in /dosbox/) -->
+  <!-- Local js-dos -->
   <link rel="stylesheet" href="js-dos.css" />
   <script src="js-dos.js"></script>
 
@@ -52,17 +52,24 @@
       width: min(1000px, 96vw);
       background: #fff; border-radius: 10px; border: 1px solid #e5e7eb;
       padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.25);
+      max-height: 96vh; display: flex; flex-direction: column; gap: 8px;
     }
-    .modal .header { display:flex; align-items:center; justify-content: space-between; margin-bottom: 8px; }
+    .modal .header { display:flex; align-items:center; justify-content: space-between; }
     .modal h2 { margin: 0; font-size: 16px; font-weight: 600; }
     .modal .actions { display:flex; gap:8px; align-items:center; }
-    #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border: 1px solid #e5e7eb; }
+    .status-line { font-size:13px; color:#374151; display:flex; align-items:center; gap:8px; }
+    .error-line { font-size:13px; color:#b91c1c; display:none; }
+    .error-line.show { display:block; }
 
-    .inline-load { display:flex; gap:8px; align-items:center; margin: 6px 0 10px; font-size: 13px; color:#374151; }
+    #dosbox {
+      width: 100%; aspect-ratio: 1050/600;
+      background:#000; border: 1px solid #e5e7eb;
+    }
+    .inline-load { display:flex; gap:8px; align-items:center; }
     progress { width: 240px; height: 12px; }
   </style>
 
-  <!-- Register SW early for COOP/COEP + caching; reload once when ready -->
+  <!-- Register SW early (COOP/COEP + caching). Reload once when ready. -->
   <script>
   (function registerCOI() {
     if (!('serviceWorker' in navigator)) return;
@@ -120,11 +127,16 @@ END main
         </div>
       </div>
 
-      <div id="inlineLoader" class="inline-load" style="display:none;">
-        <span id="inlineStatus">Loading emulator…</span>
-        <progress id="inlineProg" value="0" max="100"></progress>
-        <span id="inlineText"></span>
+      <!-- status / errors -->
+      <div class="status-line">
+        <div id="inlineLoader" class="inline-load" style="display:none;">
+          <span id="inlineStatus">Loading emulator…</span>
+          <progress id="inlineProg" value="0" max="100"></progress>
+          <span id="inlineText"></span>
+        </div>
+        <div id="inlineReady" style="display:none;">Ready.</div>
       </div>
+      <div id="inlineError" class="error-line"></div>
 
       <div id="dosbox" aria-label="DOSBox frame"></div>
     </div>
@@ -132,6 +144,8 @@ END main
 
   <script>
   (function(){
+    console.log('[init] page script start');
+
     // --- CodeMirror
     const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
       lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false,
@@ -150,6 +164,8 @@ END main
     const inlineStatus = document.getElementById('inlineStatus');
     const inlineProg = document.getElementById('inlineProg');
     const inlineText = document.getElementById('inlineText');
+    const inlineReady = document.getElementById('inlineReady');
+    const inlineError = document.getElementById('inlineError');
 
     const encoder = new TextEncoder();
     let player = null;
@@ -200,8 +216,12 @@ BUILD
     }
 
     function startDosWith(initFs){
+      console.log('[dos] startDosWith initFs entries:', initFs.length);
       if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
       elDos.innerHTML = '';
+      if (!window.Dos) {
+        throw new Error('js-dos not loaded (window.Dos is undefined)');
+      }
       player = window.Dos(elDos, {
         pathPrefix: "emulators/",
         dosboxConf: DOS_CONF,
@@ -213,15 +233,18 @@ BUILD
       });
     }
 
-    async function waitForCOIController(timeoutMs=6000){
+    async function waitForCOIController(timeoutMs=7000){
       const t0 = performance.now();
-      if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
       while (performance.now() - t0 < timeoutMs) {
-        if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
-        await new Promise(r=>setTimeout(r,100));
+        if (navigator.serviceWorker?.controller) {
+          // Some browsers may take time to set crossOriginIsolated; don’t hard fail immediately.
+          if (self.crossOriginIsolated) return;
+        }
+        await new Promise(r=>setTimeout(r,120));
       }
-      if (navigator.serviceWorker?.controller && !self.crossOriginIsolated) location.reload();
-      throw new Error('Cross-origin isolation not ready');
+      // At this point, SW likely not active or COI failed.
+      console.warn('[coi] Not crossOriginIsolated yet.');
+      // We’ll proceed; js-dos may still work (depending on build). If it fails, we show inline error.
     }
 
     function openModal(){
@@ -233,8 +256,33 @@ BUILD
       overlay.setAttribute('aria-hidden','true');
     }
 
-    // Background preloader (silent)
+    function showInlineLoader(label, done, total){
+      inlineError.classList.remove('show');
+      inlineReady.style.display = 'none';
+      inlineLoader.style.display = 'flex';
+      inlineStatus.textContent = label || 'Loading…';
+      if (typeof done === 'number' && typeof total === 'number') {
+        inlineProg.max = total; inlineProg.value = done; inlineText.textContent = `${done}/${total}`;
+      } else {
+        inlineText.textContent = '';
+      }
+    }
+    function hideInlineLoaderShowReady(){
+      inlineLoader.style.display = 'none';
+      inlineError.classList.remove('show');
+      inlineReady.style.display = 'block';
+      inlineReady.textContent = 'Ready.';
+    }
+    function showInlineError(msg){
+      inlineLoader.style.display = 'none';
+      inlineReady.style.display = 'none';
+      inlineError.textContent = 'Error: ' + msg;
+      inlineError.classList.add('show');
+    }
+
+    // Background preloader (silent text line updates only)
     async function backgroundPreload() {
+      console.log('[preload] background start');
       try {
         await waitForCOIController().catch(()=>{});
         const files = [
@@ -250,7 +298,7 @@ BUILD
         const cache = await caches.open(CACHE_NAME);
         const mem = new Map();
 
-        // Cache hits
+        // Cache hits -> fill memory for tools
         for (const f of files) {
           const hit = await cache.match(f.url);
           if (hit && f.keepInMemory) {
@@ -271,7 +319,7 @@ BUILD
             }
           }
         }
-        // Fill in-memory from hits
+        // Ensure memory has all wanted tools (from hits)
         for (const f of files) {
           if (!f.keepInMemory || mem.has(f.path)) continue;
           const hit = await cache.match(f.url);
@@ -280,23 +328,22 @@ BUILD
             mem.set(f.path, buf);
           }
         }
-        // Expose DOS names only
         toolBufs = new Map();
         for (const [k,v] of mem.entries()){
           toolBufs.set(k.split('/').pop(), v);
         }
         preloadDone = true;
-        bgPrep.textContent = 'Emulator ready.';
-      } catch {
-        // ignore; inline loader will handle.
+        bgPrep.textContent = 'Emulator prepared.';
+        console.log('[preload] background complete');
+      } catch (e) {
+        console.warn('[preload] background failed:', e);
+        // continue; foreground will handle on demand
       }
     }
 
-    // Foreground preload (with inline modal progress) if needed
+    // Foreground preload with visible progress if needed
     async function ensurePreloadedInline(){
-      if (preloadDone) return;
-      inlineLoader.style.display = 'flex';
-      inlineStatus.textContent = 'Loading emulator…';
+      if (preloadDone) { hideInlineLoaderShowReady(); return; }
 
       const files = [
         { path:'emulators/wdosbox.wasm', url:'emulators/wdosbox.wasm', required:true,  keepInMemory:false },
@@ -312,13 +359,13 @@ BUILD
       const mem = new Map();
 
       let total = files.length, done = 0;
-      inlineProg.max = total; inlineProg.value = 0; inlineText.textContent = `0/${total}`;
+      showInlineLoader('Preparing emulator…', done, total);
 
       // hits
       for (const f of files) {
         const hit = await cache.match(f.url);
         if (hit) {
-          done++; inlineProg.value = done; inlineText.textContent = `${done}/${total}`;
+          done++; showInlineLoader('Preparing emulator…', done, total);
           if (f.keepInMemory) {
             const buf = new Uint8Array(await hit.clone().arrayBuffer());
             mem.set(f.path, buf);
@@ -331,7 +378,7 @@ BUILD
         if (hit) continue;
         const resp = await fetch(new Request(f.url, { cache:'reload' })).catch(()=>null);
         if (!resp || !resp.ok) {
-          if (f.required) { inlineStatus.textContent = 'Network error loading required files.'; throw new Error('required'); }
+          if (f.required) { showInlineError('Network error loading required files.'); throw new Error('required'); }
         } else {
           cache.put(f.url, resp.clone()).catch(()=>{});
           if (f.keepInMemory) {
@@ -339,9 +386,9 @@ BUILD
             mem.set(f.path, buf);
           }
         }
-        done++; inlineProg.value = done; inlineText.textContent = `${done}/${total}`;
+        done++; showInlineLoader('Preparing emulator…', done, total);
       }
-      // fill from hits if needed
+      // fill mem from hits if needed
       for (const f of files) {
         if (!f.keepInMemory || mem.has(f.path)) continue;
         const hit = await cache.match(f.url);
@@ -355,39 +402,46 @@ BUILD
         toolBufs.set(k.split('/').pop(), v);
       }
       preloadDone = true;
-      inlineLoader.style.display = 'none';
+      hideInlineLoaderShowReady();
     }
 
     async function runCurrentBuffer(){
-      await waitForCOIController().catch(()=>{});
-      await ensurePreloadedInline();
+      try {
+        await waitForCOIController().catch(()=>{});
+        await ensurePreloadedInline();
 
-      const nm = (fileNameEl.value || 'HELLO.ASM').trim();
-      const dosAsmName = toDos83(nm);
-      const asmBytes = new TextEncoder().encode(cm.getValue());
+        const nm = (fileNameEl.value || 'HELLO.ASM').trim();
+        const dosAsmName = toDos83(nm);
+        const asmBytes = new TextEncoder().encode(cm.getValue());
 
-      const initFs = [
-        { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
-        { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
-        { path: dosAsmName,  contents: asmBytes },
-        { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) },
-      ];
-      for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
-        const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
+        const initFs = [
+          { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
+          { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
+          { path: dosAsmName,  contents: asmBytes },
+          { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) },
+        ];
+        for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
+          const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
+        }
+
+        startDosWith(initFs);
+      } catch (e) {
+        console.error('[run] failed:', e);
+        showInlineError(e && e.message ? e.message : String(e));
       }
-      startDosWith(initFs);
     }
 
     // Wire up
-    runBtn.addEventListener('click', async ()=>{
+    runBtn.addEventListener('click', ()=>{
       openModal();
-      // Give the modal a tick to render before heavy work (prevents “nothing shows” feel)
-      setTimeout(() => { runCurrentBuffer().catch(console.error); }, 0);
+      // show loader immediately (prevents “just dark overlay”)
+      showInlineLoader('Preparing emulator…');
+      setTimeout(()=>{ runCurrentBuffer(); }, 0);
     });
-    rerunBtn.addEventListener('click', ()=>{ runCurrentBuffer().catch(console.error); });
+    rerunBtn.addEventListener('click', ()=>{ showInlineLoader('Rebuilding…'); runCurrentBuffer(); });
     closeBtn.addEventListener('click', ()=>{ closeModal(); });
 
-    // Kick off background preload
+    // Background prep
     backgroundPreload();
   })();
   </script>
