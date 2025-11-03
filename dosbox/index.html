@@ -49,6 +49,28 @@
   #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border:2px solid #111; }
   ul { margin: 6px 0 0 18px; padding: 0; background:#fff; }
 </style>
+  <style>
+/* --- Force full-white page and neutralize js-dos dark wrappers --- */
+html, body, main, section { background:#fff !important; }
+body { margin:0 !important; }
+
+/* The host we control */
+#dosbox { background:#000 !important; }
+
+/* Everything js-dos injects around the canvas */
+#dosbox *,                      /* generic */
+.dosbox, .dosbox-root,
+.dosbox-container, .dosbox-viewport,
+.dosbox-overlay, .dosbox-loader {
+  background:#fff !important;
+  box-shadow:none !important;
+  border-color:#fff !important;
+}
+
+/* Keep only the canvas black */
+#dosbox canvas { background:#000 !important; }
+</style>
+
 
 <script>
 /* Service worker for COOP/COEP on GitHub Pages */
