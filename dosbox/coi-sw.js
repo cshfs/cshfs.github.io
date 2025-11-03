@@ -5,7 +5,7 @@ const COOP = 'same-origin';
 const COEP = 'require-corp';
 
 // Bump this when assets change to bust cache:
-const CACHE_NAME = 'dosbox-prewarm-v6';
+const CACHE_NAME = 'dosbox-prewarm-v7';
 
 const PRECACHE = [
   // Emulator
