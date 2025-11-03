@@ -2,7 +2,7 @@
 
 const COOP = 'same-origin';
 const COEP = 'require-corp';
-const CACHE_NAME = 'dosbox-prewarm-v8';
+const CACHE_NAME = 'dosbox-prewarm-v9';
 
 const PRECACHE = [
   './',
