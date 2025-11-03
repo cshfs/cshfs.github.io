@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="js-dos.css" />
 <script src="js-dos.js"></script>
 
-<!-- CodeMirror 5 (switch to your local files if you self-hosted) -->
+<!-- CodeMirror 5 (SELF-HOSTED IN /dosbox/) -->
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 <script src="gas.min.js"></script>
@@ -17,59 +17,53 @@
 <style>
   /* Pure white everywhere */
   html, body { height: 100%; background:#fff; }
-  body {
-    margin: 0; background:#fff; color:#000;
-    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  }
-  main { width: 100%; max-width: 980px; margin: 0 auto; padding: 12px; background:#fff; }
+  body { margin: 0; color:#000; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+
+  /* Wider page so editor isn't cramped */
+  main { width: min(1280px, 95vw); margin: 0 auto; padding: 12px; background:#fff; }
   section { margin: 12px 0; background:#fff; }
-  h1 { display:none; } /* titles removed */
+  h1 { display: none; }
 
   /* Loading strip */
-  #loading { padding: 8px 0; background:#fff; }
+  #loading { padding: 8px 0; }
   #status { font-size: 14px; margin: 6px 0; }
   progress { width: 260px; height: 12px; vertical-align: middle; }
 
-  /* Workspace fills the full viewport height */
+  /* Full-height workspace with padding so bottom buttons aren't cut */
   #workspace {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    padding-bottom: 24px;
+    margin-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* Controls (high contrast) */
+  /* Controls */
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .btn {
-    font: inherit; padding: 10px 14px;
-    background:#111; color:#fff; border:2px solid #111; cursor:pointer;
-  }
+  .btn { font: inherit; padding: 10px 14px; background:#111; color:#fff; border:2px solid #111; cursor:pointer; }
   .btn:hover { background:#000; border-color:#000; }
   .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
-  input[type="text"] {
-    font: inherit; padding: 8px; border:2px solid #111; width: 240px; background:#fff; color:#000;
-  }
+  input[type="text"] { font: inherit; padding: 8px; border:2px solid #111; width: 260px; background:#fff; color:#000; }
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-  /* Editor grows to fill remaining viewport in the workspace */
+  /* Editor container grows; actual height set via JS (setSize) */
   .editor-wrap { flex: 1; min-height: 0; display: flex; }
-  .CodeMirror {
-    height: 100%; width: 100%;
-    border:2px solid #111; background:#fff; color:#000;
-    transition: opacity .15s ease;
-  }
+  .CodeMirror { width: 100%; border:2px solid #111; background:#fff; color:#000; transition: opacity .15s ease; }
   .CodeMirror-focused { outline: 2px solid #1115; }
   .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
 
-  /* DOSBox section */
+  /* DOSBox area */
   #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border:2px solid #111; }
   ul { margin: 6px 0 0 18px; padding: 0; background:#fff; }
 
   /* Force js-dos wrappers to white */
   html, body, main, section { background:#fff !important; }
   #dosbox *, .dosbox, .dosbox-root, .dosbox-container, .dosbox-viewport,
-  .dosbox-overlay, .dosbox-loader { background:#fff !important; box-shadow:none !important; border-color:#fff !important; }
+  .dosbox-overlay, .dosbox-loader {
+    background:#fff !important; box-shadow:none !important; border-color:#fff !important;
+  }
   #dosbox canvas { background:#000 !important; }
 </style>
 
@@ -98,9 +92,9 @@
     <div id="coiNote" style="font-size:13px;color:#333;"></div>
   </section>
 
-  <!-- Full-height workspace: controls + editor + top buttons (including assets/start/stop) -->
+  <!-- Full-height workspace: controls + editor + top buttons -->
   <section id="workspace">
-    <div class="row">
+    <div class="row" id="nameRow">
       <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
       <button id="saveBtn" class="btn" type="button">Download .ASM</button>
       <button id="loadBtn" class="btn" type="button">Load .ASM</button>
@@ -112,7 +106,7 @@
 .MODEL  small
 .STACK  100h
 .DATA
-msg db 'Hello from editor!$'
+msg db 'hello this is dogs!$'
 .CODE
 main PROC
   mov ax, @data
@@ -152,7 +146,6 @@ END main
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
   });
-  setTimeout(()=>{ cm.refresh(); }, 0);
 
   // Elements
   const status = document.getElementById('status');
@@ -175,7 +168,7 @@ END main
 
   // State
   const encoder = new TextEncoder();
-  const CACHE_NAME = 'dosbox-prewarm-v10'; /* keep in sync with SW if you bumped it */
+  const CACHE_NAME = 'dosbox-prewarm-v10'; // keep in sync with SW if bumped
   let toolBufs = new Map();
   let player = null;
   let ready = false;
@@ -186,6 +179,25 @@ END main
   const savedText = localStorage.getItem(LS_KEY_TEXT);
   if (savedName) fileNameEl.value = savedName;
   if (savedText) cm.setValue(savedText);
+
+  // Resize editor to fill viewport height without cutting buttons
+  const nameRow = document.getElementById('nameRow');
+  const topControls = document.getElementById('topControls');
+  function resizeEditor() {
+    const loadingH = (loadingBox && loadingBox.offsetParent !== null) ? loadingBox.offsetHeight : 0;
+    const target = Math.max(
+      200,
+      window.innerHeight
+      - loadingH
+      - (nameRow ? nameRow.offsetHeight : 0)
+      - (topControls ? topControls.offsetHeight : 0)
+      - 36
+    );
+    cm.setSize(null, target);
+    cm.refresh();
+  }
+  window.addEventListener('resize', resizeEditor);
+  setTimeout(resizeEditor, 0);
 
   // Helpers
   const toDos83 = (name)=>{
@@ -263,7 +275,7 @@ BUILD
     }
   }
 
-  // Preload emulator + tools (file-count progress); hide strip when ready
+  // Preload emulator + tools (file-count progress)
   async function preloadAll(){
     status.textContent = 'Caching emulator and tools…';
     const files = [
@@ -319,9 +331,12 @@ BUILD
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
     // Hide loading once ready & enable Start
-    loadingBox.style.display = 'none';
+    document.getElementById('loading').style.display = 'none';
     ready = true;
     startBtn.disabled = false;
+
+    // After loading strip collapses, recalc editor height
+    resizeEditor();
   }
 
   // Editor actions
@@ -344,10 +359,11 @@ BUILD
     fileNameEl.value = toDos83(f.name);
     loader.value = '';
     cm.refresh();
+    resizeEditor();
     cm.focus();
   });
 
-  // Assets (now located in the top workspace too)
+  // Assets
   elInput.addEventListener('change', ()=>{
     for (const f of Array.from(elInput.files || [])) bag.set(f.name, f);
     refreshFileList();
