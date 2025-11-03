@@ -13,55 +13,41 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/mode/gas/gas.min.js"></script>
 
 <style>
-  /* Global: pure white UI */
-  html, body { height: 100%; }
+  /* Pure white everywhere */
+  html, body { height: 100%; background:#fff; }
   body {
-    margin: 0;
-    background: #fff;
-    color: #000;
+    margin: 0; background:#fff; color:#000;
     font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   }
-  main { width: 100%; max-width: 980px; margin: 0 auto; padding: 12px; }
+  main { width: 100%; max-width: 980px; margin: 0 auto; padding: 12px; background:#fff; }
+  section { margin: 12px 0; background:#fff; }
   h1 { margin: 0 0 12px; font-size: 20px; }
 
-  section { margin: 12px 0; }
-
   /* Loading */
-  #loading { padding: 8px 0; }
+  #loading { padding: 8px 0; background:#fff; }
   #status { font-size: 14px; margin: 6px 0; }
   progress { width: 260px; height: 12px; vertical-align: middle; }
 
-  /* Controls with strong contrast */
+  /* Controls with high contrast */
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
   .btn {
-    font: inherit;
-    padding: 10px 14px;
-    background: #111;          /* high contrast */
-    color: #fff;
-    border: 2px solid #111;
-    cursor: pointer;
+    font: inherit; padding: 10px 14px;
+    background:#111; color:#fff; border:2px solid #111; cursor:pointer;
   }
   .btn:hover { background:#000; border-color:#000; }
   .btn[disabled]{ opacity:.55; cursor:not-allowed; }
-  input[type="text"] {
-    font: inherit; padding: 8px; border: 2px solid #111; width: 240px; color:#000; background:#fff;
-  }
+  input[type="text"] { font: inherit; padding: 8px; border:2px solid #111; width: 240px; background:#fff; color:#000; }
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-  /* Editor: ensure editable, white bg, visible caret */
-  .CodeMirror {
-    height: 420px;
-    border: 2px solid #111;
-    background: #fff;
-    color: #000;
-  }
+  /* Editor */
+  .CodeMirror { height: 420px; border:2px solid #111; background:#fff; color:#000; }
   .CodeMirror-focused { outline: 2px solid #1115; }
-  .note { font-size: 13px; color:#333; }
+  .note { font-size: 13px; color:#333; background:#fff; }
 
   /* DOSBox */
-  #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border: 2px solid #111; }
-  ul { margin: 6px 0 0 18px; padding: 0; }
+  #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border:2px solid #111; }
+  ul { margin: 6px 0 0 18px; padding: 0; background:#fff; }
 </style>
 
 <script>
@@ -135,17 +121,21 @@ END main
 
 <script>
 (function(){
+  // ----- persistence keys -----
+  const LS_KEY_NAME = 'dos_editor_name_v1';
+  const LS_KEY_TEXT = 'dos_editor_text_v1';
+
   // ----- CodeMirror -----
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
   });
-  // Ensure it is interactable after layout
-  setTimeout(()=>{ cm.refresh(); cm.focus(); }, 0);
+  setTimeout(()=>{ cm.refresh(); }, 0);
 
   // Elements
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
   const progText = document.getElementById('progText');
+  const loadingBox = document.getElementById('loading');
   const coiNote = document.getElementById('coiNote');
 
   const fileNameEl = document.getElementById('fileName');
@@ -166,6 +156,12 @@ END main
   let player = null;
   let ready = false;
   const bag = new Map(); // asset files
+
+  // Load persisted editor state (if any)
+  const savedName = localStorage.getItem(LS_KEY_NAME);
+  const savedText = localStorage.getItem(LS_KEY_TEXT);
+  if (savedName) fileNameEl.value = savedName;
+  if (savedText) cm.setValue(savedText);
 
   // Helpers
   const toDos83 = (name)=>{
@@ -298,13 +294,14 @@ BUILD
     toolBufs = new Map();
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
-    status.textContent = 'Ready.';
+    // Hide the loading strip when ready
+    loadingBox.style.display = 'none';
     ready = true;
     startBtn.disabled = false;
   }
 
   // Editor actions
-  saveBtn.addEventListener('click', ()=>{
+  document.getElementById('saveBtn').addEventListener('click', ()=>{
     const name = toDos83(fileNameEl.value || 'HELLO.ASM');
     const blob = new Blob([cm.getValue()], { type: 'text/plain' });
     const a = document.createElement('a');
@@ -336,8 +333,13 @@ BUILD
   // Start / Reset
   startBtn.addEventListener('click', async ()=>{
     try {
-      const dosAsmName = toDos83((fileNameEl.value || 'HELLO.ASM').trim());
-      const asmBytes = encoder.encode(cm.getValue());   // uses latest edits
+      // Persist editor name + text on Start
+      const nameRaw = (fileNameEl.value || 'HELLO.ASM').trim();
+      localStorage.setItem(LS_KEY_NAME, nameRaw);
+      localStorage.setItem(LS_KEY_TEXT, cm.getValue());
+
+      const dosAsmName = toDos83(nameRaw);
+      const asmBytes = encoder.encode(cm.getValue());
 
       const initFs = [
         { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
