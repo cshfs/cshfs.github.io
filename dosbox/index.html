@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>DOSBox Editor → Run</title>
 
-  <!-- Keep your local js-dos bundle -->
+  <!-- Local js-dos (keep these files in /dosbox/) -->
   <link rel="stylesheet" href="js-dos.css" />
   <script src="js-dos.js"></script>
 
@@ -13,10 +13,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.17/mode/gas/gas.min.js"></script>
-
-  <!-- Preload heavy emulator assets (helps first visit) -->
-  <link rel="preload" as="fetch" href="emulators/wdosbox.wasm" type="application/wasm" crossorigin>
-  <link rel="preload" as="script" href="emulators/wdosbox.js">
 
   <style>
     :root { color-scheme: light; }
@@ -30,7 +26,6 @@
     main { width: 100%; max-width: 1100px; padding: 16px; }
     h1 { margin: 0 0 12px; font-size: 20px; font-weight: 600; }
 
-    /* Editor area */
     .toolbar { display:flex; gap:8px; align-items:center; margin: 10px 0 8px; }
     .toolbar input[type="text"] {
       font: inherit; padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 6px; width: 220px;
@@ -44,30 +39,25 @@
     .cm-wrap { border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
     .CodeMirror { height: 520px; max-width: 1000px; }
 
-    /* Small preloading hint (background) */
-    #bgPrep {
-      font-size: 13px; color: #374151; margin-top: 8px;
-    }
+    #bgPrep { font-size: 13px; color: #374151; margin-top: 8px; }
 
     /* Modal (floating pane) */
     .modal-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.4);
-      display: none; align-items: center; justify-content: center; z-index: 9999;
+      position: fixed; inset: 0; display: none;
+      align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.4); z-index: 99999;
     }
+    .modal-overlay.open { display: flex; }
     .modal {
       width: min(1000px, 96vw);
       background: #fff; border-radius: 10px; border: 1px solid #e5e7eb;
-      padding: 12px;
-      box-shadow: 0 10px 40px rgba(0,0,0,.25);
+      padding: 12px; box-shadow: 0 10px 40px rgba(0,0,0,.25);
     }
-    .modal .header {
-      display:flex; align-items:center; justify-content: space-between; margin-bottom: 8px;
-    }
+    .modal .header { display:flex; align-items:center; justify-content: space-between; margin-bottom: 8px; }
     .modal h2 { margin: 0; font-size: 16px; font-weight: 600; }
     .modal .actions { display:flex; gap:8px; align-items:center; }
     #dosbox { width: 100%; aspect-ratio: 1050/600; background:#000; border: 1px solid #e5e7eb; }
 
-    /* In-modal progress while emulator finishes preloading */
     .inline-load { display:flex; gap:8px; align-items:center; margin: 6px 0 10px; font-size: 13px; color:#374151; }
     progress { width: 240px; height: 12px; }
   </style>
@@ -93,7 +83,7 @@
 
     <div class="toolbar">
       <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
-      <button id="runBtn" class="btn">Run file</button>
+      <button id="runBtn" class="btn" type="button">Run file</button>
     </div>
 
     <div class="cm-wrap">
@@ -125,12 +115,11 @@ END main
       <div class="header">
         <h2>DOSBox</h2>
         <div class="actions">
-          <button id="rerunBtn" class="btn" title="Re-run with current editor buffer">Re-run</button>
-          <button id="closeBtn" class="btn">Close</button>
+          <button id="rerunBtn" class="btn" type="button" title="Re-run with current editor buffer">Re-run</button>
+          <button id="closeBtn" class="btn" type="button">Close</button>
         </div>
       </div>
 
-      <!-- Shown only if preloading not done yet -->
       <div id="inlineLoader" class="inline-load" style="display:none;">
         <span id="inlineStatus">Loading emulator…</span>
         <progress id="inlineProg" value="0" max="100"></progress>
@@ -145,11 +134,7 @@ END main
   (function(){
     // --- CodeMirror
     const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
-      lineNumbers: true,
-      mode: 'text/x-gas',
-      indentUnit: 2,
-      tabSize: 2,
-      indentWithTabs: false,
+      lineNumbers: true, mode: 'text/x-gas', indentUnit: 2, tabSize: 2, indentWithTabs: false,
     });
 
     // --- Elements
@@ -166,14 +151,12 @@ END main
     const inlineProg = document.getElementById('inlineProg');
     const inlineText = document.getElementById('inlineText');
 
-    // --- State
     const encoder = new TextEncoder();
     let player = null;
     let preloadDone = false;
     let toolBufs = new Map(); // DOS filename -> Uint8Array
-    const CACHE_NAME = 'dosbox-prewarm-v5'; // bump when assets change
+    const CACHE_NAME = 'dosbox-prewarm-v6';
 
-    // --- Helpers
     const toDos83 = (name)=>{
       const i = name.lastIndexOf('.');
       let b = (i>=0?name.slice(0,i):name).toUpperCase();
@@ -213,7 +196,7 @@ BUILD
         'echo Build failed.',
         ':END'
       ];
-      return encoder.encode(lines.join("\\r\\n") + "\\r\\n");
+      return encoder.encode(lines.join("\r\n") + "\r\n");
     }
 
     function startDosWith(initFs){
@@ -230,7 +213,6 @@ BUILD
       });
     }
 
-    // Minimal COI check (usually instant after SW takes control)
     async function waitForCOIController(timeoutMs=6000){
       const t0 = performance.now();
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
@@ -242,7 +224,16 @@ BUILD
       throw new Error('Cross-origin isolation not ready');
     }
 
-    // Background preloader with file-count progress (no UI, except small text)
+    function openModal(){
+      overlay.classList.add('open');
+      overlay.setAttribute('aria-hidden','false');
+    }
+    function closeModal(){
+      overlay.classList.remove('open');
+      overlay.setAttribute('aria-hidden','true');
+    }
+
+    // Background preloader (silent)
     async function backgroundPreload() {
       try {
         await waitForCOIController().catch(()=>{});
@@ -259,19 +250,15 @@ BUILD
         const cache = await caches.open(CACHE_NAME);
         const mem = new Map();
 
-        // quick pass: count hits
-        let total = files.length, done = 0;
+        // Cache hits
         for (const f of files) {
           const hit = await cache.match(f.url);
-          if (hit) {
-            done++;
-            if (f.keepInMemory) {
-              const buf = new Uint8Array(await hit.clone().arrayBuffer());
-              mem.set(f.path, buf);
-            }
+          if (hit && f.keepInMemory) {
+            const buf = new Uint8Array(await hit.clone().arrayBuffer());
+            mem.set(f.path, buf);
           }
         }
-        // fetch misses (silent)
+        // Fetch misses
         for (const f of files) {
           const hit = await cache.match(f.url);
           if (hit) continue;
@@ -282,11 +269,9 @@ BUILD
               const buf = new Uint8Array(await resp.clone().arrayBuffer());
               mem.set(f.path, buf);
             }
-          } else if (f.required) {
-            // required missing, but we'll allow retry when user clicks Run
           }
         }
-        // fill any missing in-memory from cache (for earlier hits)
+        // Fill in-memory from hits
         for (const f of files) {
           if (!f.keepInMemory || mem.has(f.path)) continue;
           const hit = await cache.match(f.url);
@@ -295,28 +280,21 @@ BUILD
             mem.set(f.path, buf);
           }
         }
-
-        // expose DOS filenames only
+        // Expose DOS names only
         toolBufs = new Map();
         for (const [k,v] of mem.entries()){
-          const name = k.split('/').pop();
-          toolBufs.set(name, v);
+          toolBufs.set(k.split('/').pop(), v);
         }
         preloadDone = true;
         bgPrep.textContent = 'Emulator ready.';
       } catch {
-        // keep silent; modal will handle fallback progress if needed
+        // ignore; inline loader will handle.
       }
     }
 
-    // Show/hide modal
-    function openModal(){ overlay.style.display = 'flex'; overlay.setAttribute('aria-hidden','false'); }
-    function closeModal(){ overlay.style.display = 'none'; overlay.setAttribute('aria-hidden','true'); }
-
-    // If clicked Run before preload is finished, show inline progress and do a foreground preload
-    async function ensurePreloadedWithInlineUI(){
+    // Foreground preload (with inline modal progress) if needed
+    async function ensurePreloadedInline(){
       if (preloadDone) return;
-
       inlineLoader.style.display = 'flex';
       inlineStatus.textContent = 'Loading emulator…';
 
@@ -363,7 +341,7 @@ BUILD
         }
         done++; inlineProg.value = done; inlineText.textContent = `${done}/${total}`;
       }
-      // fill mem from cache if needed
+      // fill from hits if needed
       for (const f of files) {
         if (!f.keepInMemory || mem.has(f.path)) continue;
         const hit = await cache.match(f.url);
@@ -374,51 +352,42 @@ BUILD
       }
       toolBufs = new Map();
       for (const [k,v] of mem.entries()){
-        const name = k.split('/').pop();
-        toolBufs.set(name, v);
+        toolBufs.set(k.split('/').pop(), v);
       }
       preloadDone = true;
       inlineLoader.style.display = 'none';
     }
 
     async function runCurrentBuffer(){
-      try{
-        await waitForCOIController().catch(()=>{});
-        // Make sure preloaded
-        await ensurePreloadedWithInlineUI();
+      await waitForCOIController().catch(()=>{});
+      await ensurePreloadedInline();
 
-        const nm = fileNameEl.value.trim() || 'HELLO.ASM';
-        const dosAsmName = toDos83(nm);
-        const asmBytes = encoder.encode(cm.getValue());
+      const nm = (fileNameEl.value || 'HELLO.ASM').trim();
+      const dosAsmName = toDos83(nm);
+      const asmBytes = new TextEncoder().encode(cm.getValue());
 
-        // Build init FS
-        const initFs = [
-          { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
-          { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
-          { path: dosAsmName,  contents: asmBytes },
-          { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) },
-        ];
-        // Optional extras if present in memory
-        for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
-          const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
-        }
-
-        startDosWith(initFs);
-      } catch (e) {
-        console.error(e);
-        alert('Could not start emulator. Check console.');
+      const initFs = [
+        { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
+        { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
+        { path: dosAsmName,  contents: asmBytes },
+        { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) },
+      ];
+      for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
+        const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
       }
+      startDosWith(initFs);
     }
 
     // Wire up
     runBtn.addEventListener('click', async ()=>{
       openModal();
-      await runCurrentBuffer();
+      // Give the modal a tick to render before heavy work (prevents “nothing shows” feel)
+      setTimeout(() => { runCurrentBuffer().catch(console.error); }, 0);
     });
-    rerunBtn.addEventListener('click', async ()=>{ await runCurrentBuffer(); });
+    rerunBtn.addEventListener('click', ()=>{ runCurrentBuffer().catch(console.error); });
     closeBtn.addEventListener('click', ()=>{ closeModal(); });
 
-    // Kick off background preload (no blocking)
+    // Kick off background preload
     backgroundPreload();
   })();
   </script>
