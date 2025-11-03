@@ -7,6 +7,9 @@ const CACHE_NAME = 'dosbox-prewarm-v9';
 const PRECACHE = [
   './',
   'index.html',
+  'codemirror/codemirror.min.css',
+  'codemirror/codemirror.min.js',
+  'codemirror/gas.min.js',
   'js-dos.js',
   'js-dos.css',
   // Emulator
