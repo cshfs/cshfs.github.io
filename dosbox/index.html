@@ -124,7 +124,7 @@ END main
     <div class="row" id="topControls">
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
       <button id="startBtn" class="btn" type="button" disabled>Start</button>
-      <button id="stopBtn" class="btn" type="button">Stop</button>
+      <!-- Stop moved below DOSBox -->
     </div>
   </section>
 
@@ -132,6 +132,9 @@ END main
   <section id="emuSection">
     <div id="dosbox" aria-label="DOSBox frame"></div>
     <ul id="fileList"></ul>
+    <div class="row" style="margin-top:10px;">
+      <button id="stopBtn" class="btn" type="button">Stop</button>
+    </div>
   </section>
 </main>
 
@@ -393,6 +396,7 @@ BUILD
     }
   });
 
+  // Stop is now under the DOSBox frame
   stopBtn.addEventListener('click', ()=>{
     window.scrollTo({ top: 0, behavior: 'smooth' });
     setTimeout(()=>location.reload(), 250);
