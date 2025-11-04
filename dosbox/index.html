@@ -18,14 +18,15 @@
 <script src="foldcode.min.js"></script>
 <script src="foldgutter.min.js"></script>
 <script src="indent-fold.min.js"></script>
+<script src="brace-fold.min.js"></script>
 
 <!-- TASM mode -->
 <script src="tasm.js"></script>
 
 <style>
   :root{
-    --ctl-h-input: 36px; /* filename input */
-    --ctl-h-btn:   30px; /* buttons (shorter than input) */
+    --ctl-h-input: 34px; /* filename input */
+    --ctl-h-btn:   26px; /* buttons (shorter) */
   }
 
   /* Force white everywhere */
@@ -39,7 +40,7 @@
   main { width: min(1280px, 95vw); margin: 0 auto; padding: 10px; }
   section { margin: 10px 0; }
 
-  /* Loading strip (tight) */
+  /* Loading strip */
   #loading { padding: 4px 0; margin: 0; }
   #status { font-size: 13px; margin: 4px 0; }
   progress { width: 220px; height: 10px; vertical-align: middle; }
@@ -58,7 +59,7 @@
   .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .btn{
     font: inherit;
-    font-size: 14px;
+    font-size: 12px;
     height: var(--ctl-h-btn);
     line-height: calc(var(--ctl-h-btn) - 4px);
     padding: 0 10px;
@@ -225,31 +226,32 @@ END start
     gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
 
-  /* Robust TASM fold helper (labels, PROC/ENDP, SEG headers). */
+  /* Simple and robust TASM fold helper: folds from a top-level
+     label/SEG/PROC line down to the next top-level line or ENDP. */
   (function() {
-    function isNonEmptyLeftEdge(lineText){
-      if (/^\s/.test(lineText)) return false;
-      if (lineText.trim() === "") return false;
-      return true;
+    function isTopLevel(s){ return s && !/^\s/.test(s) && s.trim() !== ''; }
+    function isAnchor(s){
+      return (
+        (/:\s*(;.*)?$/.test(s) && isTopLevel(s)) ||           // label:
+        (/\bproc\b/i.test(s)) ||                               // proc
+        (/^(IDEAL|MODEL|CODESEG|DATASEG|STACK)\b/i.test(s) && isTopLevel(s)) // seg headers
+      );
     }
     function tasmFold(cmInst, start) {
       const first = cmInst.getLine(start.line) || "";
-      const isLabel = /:\s*(;.*)?$/.test(first) && !/^\s/.test(first);
-      const isProc  = /\bproc\b/i.test(first);
-      const isSeg   = /^(IDEAL|MODEL|CODESEG|DATASEG|STACK)\b/i.test(first) && !/^\s/.test(first);
-      if (!isLabel && !isProc && !isSeg) return;
+      if (!isAnchor(first)) return;
 
       const last = cmInst.lineCount();
       let i = start.line + 1;
+
       while (i < last) {
         const t = cmInst.getLine(i) || "";
-        if (isLabel || isSeg) {
-          if (isNonEmptyLeftEdge(t)) break;      // next top-level thing
-        }
-        if (isProc && /^\s*endp\b/i.test(t)) { i++; break; } // include ENDP line
+        if (/^\s*endp\b/i.test(t)) { i++; break; }      // include ENDP
+        if (isTopLevel(t)) break;                       // next block
         i++;
       }
-      if (i <= start.line + 1) return;
+      if (i <= start.line + 1) return null;
+
       return {
         from: CodeMirror.Pos(start.line, first.length),
         to: CodeMirror.Pos(i - 1, (cmInst.getLine(i - 1) || "").length)
@@ -258,7 +260,7 @@ END start
     CodeMirror.registerHelper("fold", "tasm", tasmFold);
   })();
 
-  /* Range finder: try TASM, else indent. */
+  /* Range finder: try TASM first, then indent. */
   function tasmOrIndent(cmInst, start) {
     return (CodeMirror.fold.tasm && CodeMirror.fold.tasm(cmInst, start)) ||
            (CodeMirror.fold.indent && CodeMirror.fold.indent(cmInst, start)) ||
@@ -319,6 +321,7 @@ END start
       });
     } catch {}
   }
+  // Use our rangeFinder on gutter clicks and persist
   cm.on('gutterClick', (cmI, line, gutter) => {
     if (gutter === 'CodeMirror-foldgutter') {
       cmI.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: tasmOrIndent });
@@ -418,11 +421,10 @@ BUILD
       kiosk: true,
       autostart: true
     });
-    // size after canvas attaches
     requestAnimationFrame(() => setTimeout(sizeDosbox, 60));
   }
 
-  /* Reliable reveal + scroll after Start */
+  /* Reveal + scroll after Start */
   function revealAndScroll() {
     htmlEl.classList.remove('no-scroll');
     bodyEl.classList.remove('no-scroll');
@@ -432,13 +434,12 @@ BUILD
     requestAnimationFrame(() => {
       resizeEditor();
       sizeDosbox();
-      // try both methods
       emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setTimeout(() => window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior: 'smooth' }), 160);
     });
   }
 
-  /* Poll for canvas to ensure final scroll lands */
+  /* Final nudge once canvas appears */
   function waitForCanvasAndNudge() {
     const t0 = performance.now();
     (function tick(){
@@ -543,6 +544,7 @@ BUILD
       const nameRaw = (fileNameEl.value || 'base.asm').trim();
       localStorage.setItem(LS_KEY_NAME, nameRaw);
       localStorage.setItem(LS_KEY_TEXT, cm.getValue());
+      // Persist current folds
       saveFolds();
 
       cm.setOption('readOnly', true);
@@ -588,7 +590,14 @@ BUILD
   bodyEl.classList.add('no-scroll');
 
   (async ()=>{
-    await waitForCOIController().catch(()=>{});
+    await (async function waitForCOIController(timeoutMs=8000){
+      const t0 = performance.now();
+      while (performance.now() - t0 < timeoutMs) {
+        if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
+        await new Promise(r=>setTimeout(r,120));
+      }
+      document.getElementById('coiNote').textContent = 'Note: page not isolated yet. If Start fails, hard-refresh.';
+    })();
     try { await preloadAll(); }
     catch (e) { status.textContent = 'Preload failed. Hard-refresh.'; console.error(e); }
   })();
