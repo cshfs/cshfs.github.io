@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
-<!-- Folding addons (local, in /dosbox) -->
+<!-- Folding addons (local) -->
 <link rel="stylesheet" href="foldgutter.min.css">
 <script src="foldcode.min.js"></script>
 <script src="foldgutter.min.js"></script>
@@ -25,71 +25,61 @@
 
 <style>
   :root{
-    --ctl-h: 32px; /* unified exact height for input + buttons (Option B) */
+    --ctl-h: 30px; /* exact shared outer height for input and buttons */
   }
 
-  /* Force white everywhere */
+  /* Force white */
   :root, html, body { height: 100%; background:#fff !important; color:#000; }
   body { margin: 0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
   body, main, section, #dosbox, #dosbox * { background:#fff !important; }
 
-  /* Disable scroll while emulator hidden */
   html.no-scroll, body.no-scroll { overflow-y: hidden; }
 
   main { width: min(1280px, 95vw); margin: 0 auto; padding: 10px; }
   section { margin: 10px 0; }
 
-  /* Loading strip */
+  /* Loading */
   #loading { padding: 4px 0; margin: 0; }
   #status { font-size: 13px; margin: 4px 0; }
   progress { width: 220px; height: 10px; vertical-align: middle; }
 
   /* Workspace */
   #workspace {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-bottom: 120px; /* used only when emulator visible */
-    margin-bottom: env(safe-area-inset-bottom, 0px);
+    display: flex; flex-direction: column; gap: 8px;
+    padding-bottom: 120px; margin-bottom: env(safe-area-inset-bottom, 0px);
   }
   #workspace.no-safe { padding-bottom: 0; }
 
-  /* Controls — white buttons, black border/text, same height as input, flat borders */
+  /* Controls: white, black border, flat, same height as input */
   .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .btn{
-    font: inherit;
-    font-size: 12px;
+    display:inline-flex; align-items:center; justify-content:center;
+    font: inherit; font-size: 12px;
     height: var(--ctl-h);
-    line-height: calc(var(--ctl-h) - 4px); /* minus 2px top + 2px bottom border */
     padding: 0 10px;
-    background:#fff; color:#000; border:2px solid #000; cursor:pointer;
-    box-sizing: border-box;
-    border-radius: 0; /* flat edge */
+    border: 2px solid #000; border-radius: 0;
+    background:#fff; color:#000; cursor:pointer; box-sizing:border-box;
   }
   .btn:hover { background:#f4f4f4; }
   .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
 
   #fileName{
-    font: inherit;
-    font-size: 18px;
+    font: inherit; font-size: 18px;
     height: var(--ctl-h);
     padding: 0 10px;
-    border:2px solid #000;
-    width: 260px;
-    background:#fff; color:#000;
-    box-sizing: border-box;
-    border-radius: 0; /* flat edge */
+    border:2px solid #000; border-radius:0; box-sizing:border-box;
+    width: 260px; background:#fff; color:#000;
   }
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
   /* Editor */
-  .editor-wrap { min-height: 0; display: flex; }
-  .CodeMirror { width: 100%; border:2px solid #000; }
+  .editor-wrap { min-height: 0; display:flex; }
+  .CodeMirror { width:100%; border:2px solid #000; }
   .CodeMirror-focused { outline: 2px solid #1115; }
-  .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
+  .cm-locked .CodeMirror { opacity:.5; pointer-events:none; }
   .CodeMirror-gutters { border-right:2px solid #000; }
-  .CodeMirror-foldgutter { width: 16px; cursor: pointer; }
+  .CodeMirror-foldgutter { width:16px; cursor:pointer; }
   .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters { background:#fff !important; color:#000; }
 
   /* Fold markers */
@@ -100,18 +90,12 @@
   /* Emulator hidden until Start */
   #emuSection { display:none; }
 
-  /* DOSBox frame */
-  #dosbox {
-    border:2px solid #000;
-    width: 100%;
-    height: 600px;
-    aspect-ratio: 1050/600;
-    position: relative;
-  }
+  /* DOSBox */
+  #dosbox { border:2px solid #000; width:100%; height:600px; aspect-ratio:1050/600; position:relative; }
   #dosbox canvas { width:100% !important; height:100% !important; display:block; background:#000 !important; }
 
   /* Force js-dos wrappers to white */
-  :where(.dosbox-root, .dosbox-container, .dosbox-viewport, .dosbox-overlay, .dosbox-loader, .dosbox) {
+  :where(.dosbox-root, .dosbox-container, .dosbox-viewport, .dosbox-overlay, .dosbox-loader, .dosbox){
     background:#fff !important; box-shadow:none !important; border-color:#fff !important;
   }
 
@@ -151,7 +135,6 @@
     <div id="coiNote" style="font-size:12px;color:#333;"></div>
   </section>
 
-  <!-- start hidden-safe -->
   <section id="workspace" class="no-safe">
     <div class="row" id="nameRow">
       <input id="fileName" type="text" value="base.asm" aria-label="File name">
@@ -213,12 +196,17 @@ END start
 
 <script>
 (function(){
+  /* ===== Persistence keys ===== */
+  const LS_KEY_NAME = 'dos_editor_name_v1';
+  const LS_KEY_TEXT = 'dos_editor_text_v1';
+
   const htmlEl = document.documentElement;
   const bodyEl = document.body;
   const workspace = document.getElementById('workspace');
   const emuSection = document.getElementById('emuSection');
   const mainEl = document.querySelector('main');
 
+  /* ===== Editor ===== */
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true,
     mode: 'tasm',
@@ -228,67 +216,77 @@ END start
     gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
 
-  /* Folding: TASM labels/PROC/segments + regions + indent + braces */
+  /* --- TASM fold helper + combine with indent/brace --- */
   (function() {
-    function isTopLevel(s){ return s && !/^\s/.test(s) && s.trim() !== ''; }
+    function isTopLevel(s){
+      // top-level: starts at col 0 with a letter or dot keyword, not blank, not comment
+      return s && !/^\s/.test(s) && !/^\s*;/.test(s) && s.trim() !== '';
+    }
     function isLabel(s){ return /:\s*(;.*)?$/.test(s) && isTopLevel(s); }
     function isProc(s){ return /\bproc\b/i.test(s); }
     function isEndp(s){ return /^\s*endp\b/i.test(s); }
-    function isSeg(s){ return /^(IDEAL|MODEL|CODESEG|DATASEG|STACK)\b/i.test(s) && isTopLevel(s); }
-    function isRegionStart(s){ return /^\s*;\s*#region\b/i.test(s); }
-    function isRegionEnd(s){ return /^\s*;\s*#endregion\b/i.test(s); }
-
-    function rangeFromTo(cmInst, fromLine, toLine){
-      if (toLine <= fromLine) return null;
-      const a = cmInst.getLine(fromLine) || "";
-      const b = cmInst.getLine(toLine) || "";
-      return { from: CodeMirror.Pos(fromLine, a.length), to: CodeMirror.Pos(toLine, b.length) };
-    }
+    function isSeg(s){ return /^(IDEAL|MODEL|CODESEG|DATASEG|STACK|ENDS?)\b/i.test(s) && isTopLevel(s); }
 
     function tasmFold(cmInst, start) {
       const first = cmInst.getLine(start.line) || "";
-
-      // ;#region ... ;#endregion
-      if (isRegionStart(first)) {
-        const last = cmInst.lineCount();
-        for (let i = start.line + 1; i < last; i++) {
-          if (isRegionEnd(cmInst.getLine(i)||"")) return rangeFromTo(cmInst, start.line, i);
-        }
-        return null;
-      }
-
-      const anchor = isLabel(first) || isProc(first) || isSeg(first);
-      if (!anchor) return null;
+      if (!(isLabel(first) || isProc(first) || isSeg(first))) return null;
 
       const last = cmInst.lineCount();
       let i = start.line + 1;
       while (i < last) {
         const t = cmInst.getLine(i) || "";
-        if (isProc(first) && isEndp(t)) { i++; break; }   // include ENDP
-        if (isTopLevel(t)) break;                         // next block
+        if (isProc(first) && isEndp(t)) { i++; break; }      // include ENDP
+        if (isTopLevel(t)) break;                            // next block
         i++;
       }
-      return rangeFromTo(cmInst, start.line, i - 1);
+      if (i <= start.line + 1) return null;
+
+      return {
+        from: CodeMirror.Pos(start.line, first.length),
+        to:   CodeMirror.Pos(i - 1, (cmInst.getLine(i - 1) || "").length)
+      };
     }
     CodeMirror.registerHelper("fold", "tasm", tasmFold);
   })();
 
-  function masterRange(cmInst, start) {
-    return (CodeMirror.fold.tasm   && CodeMirror.fold.tasm(cmInst, start)) ||
-           (CodeMirror.fold.indent && CodeMirror.fold.indent(cmInst, start)) ||
-           (CodeMirror.fold.brace  && CodeMirror.fold.brace(cmInst, start)) ||
-           null;
-  }
-  cm.setOption("foldOptions", { rangeFinder: masterRange });
+  const rangeFinder = CodeMirror.fold.combine(
+    CodeMirror.fold.tasm,
+    CodeMirror.fold.indent,
+    CodeMirror.fold.brace
+  );
+  cm.setOption("foldOptions", { rangeFinder });
 
-  // Click-to-fold
-  cm.on('gutterClick', (cmI, line, gutter) => {
+  // Gutter click uses the same rangeFinder
+  cm.on('gutterClick', (inst, line, gutter) => {
     if (gutter === 'CodeMirror-foldgutter') {
-      cmI.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: masterRange });
+      inst.foldCode(CodeMirror.Pos(line, 0), { rangeFinder });
     }
   });
 
-  /* Sizing */
+  /* ===== Save/restore file name + content ===== */
+  const fileNameEl = document.getElementById('fileName');
+  const savedName = localStorage.getItem(LS_KEY_NAME);
+  const savedText = localStorage.getItem(LS_KEY_TEXT);
+  if (savedName) fileNameEl.value = savedName;
+  if (savedText) cm.setValue(savedText);
+
+  function persistNow(){
+    localStorage.setItem(LS_KEY_NAME, fileNameEl.value || 'base.asm');
+    localStorage.setItem(LS_KEY_TEXT, cm.getValue());
+  }
+  fileNameEl.addEventListener('input', persistNow);
+  cm.on('change', () => { // light debounce
+    clearTimeout(persistNow._t);
+    persistNow._t = setTimeout(persistNow, 150);
+  });
+
+  function autoDetectTasm(filename) {
+    cm.setOption("mode", filename.toLowerCase().endsWith(".asm") ? "tasm" : null);
+  }
+  fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
+  autoDetectTasm(fileNameEl.value);
+
+  /* ===== Sizing ===== */
   const nameRow = document.getElementById('nameRow');
   const loadingBox = document.getElementById('loading');
 
@@ -309,15 +307,7 @@ END start
   if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeEditor);
   setTimeout(resizeEditor, 0);
 
-  function autoDetectTasm(filename) {
-    cm.setOption("mode", filename.toLowerCase().endsWith(".asm") ? "tasm" : null);
-  }
-
-  const fileNameEl = document.getElementById('fileName');
-  fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
-  autoDetectTasm(fileNameEl.value);
-
-  /* DOSBox sizing */
+  /* ===== DOSBox sizing ===== */
   const AR_W = 1050, AR_H = 600;
   const elDos = document.getElementById('dosbox');
   function sizeDosbox() {
@@ -332,7 +322,7 @@ END start
     elDos.style.height = targetH + 'px';
   }
 
-  /* Helpers */
+  /* ===== Helpers ===== */
   const encoder = new TextEncoder();
   function toDos83(name){
     const i = name.lastIndexOf('.');
@@ -395,7 +385,7 @@ BUILD
     requestAnimationFrame(() => setTimeout(sizeDosbox, 60));
   }
 
-  /* Reveal + scroll after Start */
+  /* Reveal + scroll */
   function revealAndScroll() {
     htmlEl.classList.remove('no-scroll');
     bodyEl.classList.remove('no-scroll');
@@ -488,13 +478,14 @@ BUILD
   const stopBtn = document.getElementById('stopBtn');
 
   saveBtn.addEventListener('click', ()=>{
-    const name = (document.getElementById('fileName').value || 'BASE.ASM');
+    const name = (fileNameEl.value || 'BASE.ASM');
     const blob = new Blob([cm.getValue()], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name.toUpperCase();
     a.click();
     URL.revokeObjectURL(a.href);
+    persistNow();
   });
 
   loadBtn.addEventListener('click', ()=> loader.click());
@@ -502,18 +493,19 @@ BUILD
     const f = loader.files && loader.files[0];
     if (!f) return;
     cm.setValue(await f.text());
-    document.getElementById('fileName').value = f.name;
+    fileNameEl.value = f.name;
     loader.value = '';
     cm.refresh();
     resizeEditor();
     cm.focus();
+    persistNow();
   });
 
   elInput.addEventListener('change', ()=>{ for (const f of Array.from(elInput.files || [])) bag.set(f.name, f); elInput.value=''; });
 
   startBtn.addEventListener('click', async ()=>{
     try {
-      const nameRaw = (document.getElementById('fileName').value || 'base.asm').trim();
+      persistNow();
 
       cm.setOption('readOnly', true);
       workspace.classList.add('cm-locked');
@@ -523,7 +515,7 @@ BUILD
       // Reveal and scroll
       revealAndScroll();
 
-      const dosAsmName = toDos83(nameRaw);
+      const dosAsmName = toDos83(fileNameEl.value || 'base.asm');
       const asmBytes = encoder.encode(cm.getValue());
 
       const initFs = [
@@ -558,7 +550,7 @@ BUILD
   bodyEl.classList.add('no-scroll');
 
   (async ()=>{
-    // COI wait
+    // Wait a bit for COI. If not ready, still proceed.
     const t0 = performance.now();
     while (performance.now() - t0 < 8000) {
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) break;
