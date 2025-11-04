@@ -13,19 +13,18 @@
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
-<!-- Folding addons (local) -->
+<!-- Folding addon: **indent only** -->
 <link rel="stylesheet" href="foldgutter.min.css">
 <script src="foldcode.min.js"></script>
 <script src="foldgutter.min.js"></script>
 <script src="indent-fold.min.js"></script>
-<script src="brace-fold.min.js"></script>
 
 <!-- TASM mode -->
 <script src="tasm.js"></script>
 
 <style>
   :root{
-    --ctl-h: 30px; /* exact shared outer height for input and buttons */
+    --ctl-h: 28px; /* shared outer height for input and buttons */
   }
 
   /* Force white */
@@ -44,19 +43,15 @@
   progress { width: 220px; height: 10px; vertical-align: middle; }
 
   /* Workspace */
-  #workspace {
-    display: flex; flex-direction: column; gap: 8px;
-    padding-bottom: 120px; margin-bottom: env(safe-area-inset-bottom, 0px);
-  }
+  #workspace { display:flex; flex-direction:column; gap:8px; padding-bottom:120px; margin-bottom: env(safe-area-inset-bottom, 0px); }
   #workspace.no-safe { padding-bottom: 0; }
 
-  /* Controls: white, black border, flat, same height as input */
-  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  /* Controls — white, black border, flat, EXACT same height */
+  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
   .btn{
     display:inline-flex; align-items:center; justify-content:center;
     font: inherit; font-size: 12px;
-    height: var(--ctl-h);
-    padding: 0 10px;
+    height: var(--ctl-h); padding: 0 10px;
     border: 2px solid #000; border-radius: 0;
     background:#fff; color:#000; cursor:pointer; box-sizing:border-box;
   }
@@ -65,16 +60,19 @@
 
   #fileName{
     font: inherit; font-size: 18px;
-    height: var(--ctl-h);
-    padding: 0 10px;
+    height: var(--ctl-h); padding: 0 10px;
+    line-height: calc(var(--ctl-h) - 4px); /* vertically center like buttons */
     border:2px solid #000; border-radius:0; box-sizing:border-box;
     width: 260px; background:#fff; color:#000;
+    outline: none;
   }
+  #fileName:focus { outline: 2px solid #0003; }
+
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
   /* Editor */
-  .editor-wrap { min-height: 0; display:flex; }
+  .editor-wrap { min-height:0; display:flex; }
   .CodeMirror { width:100%; border:2px solid #000; }
   .CodeMirror-focused { outline: 2px solid #1115; }
   .cm-locked .CodeMirror { opacity:.5; pointer-events:none; }
@@ -83,7 +81,7 @@
   .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters { background:#fff !important; color:#000; }
 
   /* Fold markers */
-  .CodeMirror-foldmarker { color:#000; font-weight:700; text-shadow:none; cursor:pointer; }
+  .CodeMirror-foldmarker { color:#000; font-weight:700; cursor:pointer; }
   .CodeMirror-foldgutter-open:after  { content:"▾"; color:#000; }
   .CodeMirror-foldgutter-closed:after{ content:"▸"; color:#000; }
 
@@ -213,53 +211,14 @@ END start
     indentUnit: 2,
     tabSize: 2,
     foldGutter: true,
-    gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
+    gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"],
+    foldOptions: { rangeFinder: CodeMirror.fold.indent } // indent-fold only
   });
 
-  /* --- TASM fold helper + combine with indent/brace --- */
-  (function() {
-    function isTopLevel(s){
-      // top-level: starts at col 0 with a letter or dot keyword, not blank, not comment
-      return s && !/^\s/.test(s) && !/^\s*;/.test(s) && s.trim() !== '';
-    }
-    function isLabel(s){ return /:\s*(;.*)?$/.test(s) && isTopLevel(s); }
-    function isProc(s){ return /\bproc\b/i.test(s); }
-    function isEndp(s){ return /^\s*endp\b/i.test(s); }
-    function isSeg(s){ return /^(IDEAL|MODEL|CODESEG|DATASEG|STACK|ENDS?)\b/i.test(s) && isTopLevel(s); }
-
-    function tasmFold(cmInst, start) {
-      const first = cmInst.getLine(start.line) || "";
-      if (!(isLabel(first) || isProc(first) || isSeg(first))) return null;
-
-      const last = cmInst.lineCount();
-      let i = start.line + 1;
-      while (i < last) {
-        const t = cmInst.getLine(i) || "";
-        if (isProc(first) && isEndp(t)) { i++; break; }      // include ENDP
-        if (isTopLevel(t)) break;                            // next block
-        i++;
-      }
-      if (i <= start.line + 1) return null;
-
-      return {
-        from: CodeMirror.Pos(start.line, first.length),
-        to:   CodeMirror.Pos(i - 1, (cmInst.getLine(i - 1) || "").length)
-      };
-    }
-    CodeMirror.registerHelper("fold", "tasm", tasmFold);
-  })();
-
-  const rangeFinder = CodeMirror.fold.combine(
-    CodeMirror.fold.tasm,
-    CodeMirror.fold.indent,
-    CodeMirror.fold.brace
-  );
-  cm.setOption("foldOptions", { rangeFinder });
-
-  // Gutter click uses the same rangeFinder
+  // Gutter click folds using indent-fold
   cm.on('gutterClick', (inst, line, gutter) => {
     if (gutter === 'CodeMirror-foldgutter') {
-      inst.foldCode(CodeMirror.Pos(line, 0), { rangeFinder });
+      inst.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: CodeMirror.fold.indent });
     }
   });
 
@@ -275,10 +234,7 @@ END start
     localStorage.setItem(LS_KEY_TEXT, cm.getValue());
   }
   fileNameEl.addEventListener('input', persistNow);
-  cm.on('change', () => { // light debounce
-    clearTimeout(persistNow._t);
-    persistNow._t = setTimeout(persistNow, 150);
-  });
+  cm.on('change', () => { clearTimeout(persistNow._t); persistNow._t = setTimeout(persistNow, 150); });
 
   function autoDetectTasm(filename) {
     cm.setOption("mode", filename.toLowerCase().endsWith(".asm") ? "tasm" : null);
@@ -512,7 +468,6 @@ BUILD
       startBtn.disabled = true;
       startBtn.classList.add('disabled');
 
-      // Reveal and scroll
       revealAndScroll();
 
       const dosAsmName = toDos83(fileNameEl.value || 'base.asm');
@@ -550,7 +505,7 @@ BUILD
   bodyEl.classList.add('no-scroll');
 
   (async ()=>{
-    // Wait a bit for COI. If not ready, still proceed.
+    // wait a bit for COI; proceed even if not ready
     const t0 = performance.now();
     while (performance.now() - t0 < 8000) {
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) break;
