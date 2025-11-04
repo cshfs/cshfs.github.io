@@ -25,8 +25,7 @@
 
 <style>
   :root{
-    --ctl-h-input: 34px; /* filename input */
-    --ctl-h-btn:   26px; /* buttons (shorter) */
+    --ctl-h: 36px; /* unified control height for input + buttons */
   }
 
   /* Force white everywhere */
@@ -55,48 +54,56 @@
   }
   #workspace.no-safe { padding-bottom: 0; }
 
-  /* Controls — compact and unified heights */
+  /* Controls — white buttons, black border/text, same height as input */
   .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .btn{
     font: inherit;
-    font-size: 12px;
-    height: var(--ctl-h-btn);
-    line-height: calc(var(--ctl-h-btn) - 4px);
-    padding: 0 10px;
-    background:#111; color:#fff; border:2px solid #111; cursor:pointer;
+    font-size: 13px;
+    height: var(--ctl-h);
+    line-height: calc(var(--ctl-h) - 4px);
+    padding: 0 12px;
+    background:#fff; color:#000; border:2px solid #000; cursor:pointer;
+    box-sizing: border-box;
   }
-  .btn:hover { background:#000; border-color:#000; }
+  .btn:hover { background:#f5f5f5; }
   .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
 
   #fileName{
     font: inherit;
     font-size: 18px;
-    height: var(--ctl-h-input);
-    padding: 0 10px;
-    border:2px solid #111;
+    height: var(--ctl-h);
+    padding: 0 12px;
+    border:2px solid #000;
     width: 260px;
     background:#fff; color:#000;
     box-sizing: border-box;
   }
-
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
   /* Editor */
   .editor-wrap { min-height: 0; display: flex; }
-  .CodeMirror { width: 100%; border:2px solid #111; }
+  .CodeMirror { width: 100%; border:2px solid #000; }
   .CodeMirror-focused { outline: 2px solid #1115; }
   .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
-  .CodeMirror-gutters { border-right:2px solid #111; }
-  .CodeMirror-foldgutter { width: 14px; cursor: pointer; }
+  .CodeMirror-gutters { border-right:2px solid #000; }
+  .CodeMirror-foldgutter { width: 16px; cursor: pointer; }
   .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters { background:#fff !important; color:#000; }
+
+  /* Make fold markers visible even without the stock CSS sprites */
+  .CodeMirror-foldmarker {
+    color:#000; font-weight:700; text-shadow:none; cursor:pointer;
+  }
+  .CodeMirror-foldgutter-open:after  { content:"▾"; color:#000; }
+  .CodeMirror-foldgutter-folded:after,
+  .CodeMirror-foldgutter-closed:after{ content:"▸"; color:#000; }
 
   /* Emulator hidden until Start */
   #emuSection { display:none; }
 
   /* DOSBox frame */
   #dosbox {
-    border:2px solid #111;
+    border:2px solid #000;
     width: 100%;
     height: 600px;
     aspect-ratio: 1050/600;
@@ -226,47 +233,68 @@ END start
     gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
 
-  /* Simple and robust TASM fold helper: folds from a top-level
-     label/SEG/PROC line down to the next top-level line or ENDP. */
+  /* ==== Robust folding: TASM labels/PROC/segments + regions + indent + braces ==== */
   (function() {
     function isTopLevel(s){ return s && !/^\s/.test(s) && s.trim() !== ''; }
-    function isAnchor(s){
-      return (
-        (/:\s*(;.*)?$/.test(s) && isTopLevel(s)) ||           // label:
-        (/\bproc\b/i.test(s)) ||                               // proc
-        (/^(IDEAL|MODEL|CODESEG|DATASEG|STACK)\b/i.test(s) && isTopLevel(s)) // seg headers
-      );
+    function isLabel(s){ return /:\s*(;.*)?$/.test(s) && isTopLevel(s); }
+    function isProc(s){ return /\bproc\b/i.test(s); }
+    function isEndp(s){ return /^\s*endp\b/i.test(s); }
+    function isSeg(s){ return /^(IDEAL|MODEL|CODESEG|DATASEG|STACK)\b/i.test(s) && isTopLevel(s); }
+    function isRegionStart(s){ return /^\s*;\s*#region\b/i.test(s); }
+    function isRegionEnd(s){ return /^\s*;\s*#endregion\b/i.test(s); }
+
+    function rangeFromTo(cmInst, fromLine, toLine){
+      if (toLine <= fromLine) return null;
+      const a = cmInst.getLine(fromLine) || "";
+      const b = cmInst.getLine(toLine) || "";
+      return {
+        from: CodeMirror.Pos(fromLine, a.length),
+        to:   CodeMirror.Pos(toLine,   b.length)
+      };
     }
+
     function tasmFold(cmInst, start) {
       const first = cmInst.getLine(start.line) || "";
-      if (!isAnchor(first)) return;
+
+      // Region folding ;#region ... ;#endregion
+      if (isRegionStart(first)) {
+        const last = cmInst.lineCount();
+        for (let i = start.line + 1; i < last; i++) {
+          if (isRegionEnd(cmInst.getLine(i)||"")) {
+            return rangeFromTo(cmInst, start.line, i);
+          }
+        }
+        return null;
+      }
+
+      const anchor = isLabel(first) || isProc(first) || isSeg(first);
+      if (!anchor) return null;
 
       const last = cmInst.lineCount();
       let i = start.line + 1;
-
       while (i < last) {
         const t = cmInst.getLine(i) || "";
-        if (/^\s*endp\b/i.test(t)) { i++; break; }      // include ENDP
-        if (isTopLevel(t)) break;                       // next block
+        if (isProc(first) && isEndp(t)) { i++; break; }   // include ENDP
+        if (isTopLevel(t)) break;                         // next block
         i++;
       }
-      if (i <= start.line + 1) return null;
-
-      return {
-        from: CodeMirror.Pos(start.line, first.length),
-        to: CodeMirror.Pos(i - 1, (cmInst.getLine(i - 1) || "").length)
-      };
+      return rangeFromTo(cmInst, start.line, i - 1);
     }
+
     CodeMirror.registerHelper("fold", "tasm", tasmFold);
   })();
 
-  /* Range finder: try TASM first, then indent. */
-  function tasmOrIndent(cmInst, start) {
+  // master rangeFinder: try TASM, then indent, then braces
+  function masterRange(cmInst, start) {
     return (CodeMirror.fold.tasm && CodeMirror.fold.tasm(cmInst, start)) ||
            (CodeMirror.fold.indent && CodeMirror.fold.indent(cmInst, start)) ||
+           (CodeMirror.fold.brace  && CodeMirror.fold.brace(cmInst, start)) ||
            null;
   }
-  cm.setOption("foldOptions", { rangeFinder: tasmOrIndent });
+  cm.setOption("foldOptions", { rangeFinder: masterRange });
+
+  // Ensure fold markers render even if CSS misses
+  CodeMirror.defineOption("foldMarker", "\u2026"); // not required, but harmless
 
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
@@ -295,7 +323,7 @@ END start
 
   const nameRow = document.getElementById('nameRow');
 
-  /* fold persistence */
+  /* ===== Fold persistence (per filename) ===== */
   function foldsKey() {
     const name = (fileNameEl.value || 'base.asm').toLowerCase();
     return LS_FOLDS_PREFIX + name;
@@ -317,20 +345,19 @@ END start
       if (!data) return;
       const folds = JSON.parse(data);
       folds.forEach(([from]) => {
-        cm.foldCode(CodeMirror.Pos(from, 0), { rangeFinder: tasmOrIndent });
+        cm.foldCode(CodeMirror.Pos(from, 0), { rangeFinder: masterRange });
       });
     } catch {}
   }
-  // Use our rangeFinder on gutter clicks and persist
   cm.on('gutterClick', (cmI, line, gutter) => {
     if (gutter === 'CodeMirror-foldgutter') {
-      cmI.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: tasmOrIndent });
+      cmI.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: masterRange });
       setTimeout(saveFolds, 0);
     }
   });
   window.addEventListener('beforeunload', saveFolds);
 
-  /* sizing */
+  /* ===== Sizing ===== */
   function resizeEditor() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
     const mainPad = getComputedStyle(mainEl);
@@ -354,6 +381,7 @@ END start
   fileNameEl.addEventListener("input", () => { autoDetectTasm(fileNameEl.value); restoreFolds(); });
   autoDetectTasm(fileNameEl.value);
 
+  /* ===== DOSBox sizing ===== */
   const AR_W = 1050, AR_H = 600;
   function sizeDosbox() {
     const pageW = mainEl.clientWidth;
@@ -367,6 +395,7 @@ END start
     elDos.style.height = targetH + 'px';
   }
 
+  /* ===== Helpers ===== */
   const toDos83 = (name)=>{
     const i = name.lastIndexOf('.');
     let b = (i>=0?name.slice(0,i):name).toUpperCase();
@@ -424,7 +453,7 @@ BUILD
     requestAnimationFrame(() => setTimeout(sizeDosbox, 60));
   }
 
-  /* Reveal + scroll after Start */
+  /* ===== Reveal + scroll after Start ===== */
   function revealAndScroll() {
     htmlEl.classList.remove('no-scroll');
     bodyEl.classList.remove('no-scroll');
@@ -439,7 +468,6 @@ BUILD
     });
   }
 
-  /* Final nudge once canvas appears */
   function waitForCanvasAndNudge() {
     const t0 = performance.now();
     (function tick(){
@@ -454,6 +482,7 @@ BUILD
     })();
   }
 
+  /* ===== COI wait ===== */
   async function waitForCOIController(timeoutMs=8000){
     const t0 = performance.now();
     while (performance.now() - t0 < timeoutMs) {
@@ -463,6 +492,7 @@ BUILD
     document.getElementById('coiNote').textContent = 'Note: page not isolated yet. If Start fails, hard-refresh.';
   }
 
+  /* ===== Preload ===== */
   async function preloadAll(){
     status.textContent = 'Caching emulator and tools…';
     const files = [
@@ -513,6 +543,7 @@ BUILD
     resizeEditor();
   }
 
+  /* ===== Actions ===== */
   saveBtn.addEventListener('click', ()=>{
     const name = (fileNameEl.value || 'BASE.ASM');
     const blob = new Blob([cm.getValue()], { type: 'text/plain' });
@@ -544,7 +575,6 @@ BUILD
       const nameRaw = (fileNameEl.value || 'base.asm').trim();
       localStorage.setItem(LS_KEY_NAME, nameRaw);
       localStorage.setItem(LS_KEY_TEXT, cm.getValue());
-      // Persist current folds
       saveFolds();
 
       cm.setOption('readOnly', true);
@@ -590,14 +620,7 @@ BUILD
   bodyEl.classList.add('no-scroll');
 
   (async ()=>{
-    await (async function waitForCOIController(timeoutMs=8000){
-      const t0 = performance.now();
-      while (performance.now() - t0 < timeoutMs) {
-        if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
-        await new Promise(r=>setTimeout(r,120));
-      }
-      document.getElementById('coiNote').textContent = 'Note: page not isolated yet. If Start fails, hard-refresh.';
-    })();
+    await waitForCOIController().catch(()=>{});
     try { await preloadAll(); }
     catch (e) { status.textContent = 'Preload failed. Hard-refresh.'; console.error(e); }
   })();
