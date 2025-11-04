@@ -18,8 +18,9 @@
 
 <style>
   :root{
-    --ctl-h: 28px;  /* exact outer height for input + buttons */
-    --ctl-font: 12px; /* shared control font size (buttons + input) */
+    --ctl-h: 28px;          /* exact outer height for input + buttons */
+    --ctl-font: 12px;       /* shared control font size (buttons + input) */
+    --overlay-z: 99999;
   }
 
   /* Force white everywhere */
@@ -27,16 +28,35 @@
   body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
   body, main, section, #dosbox, #dosbox * { background:#fff !important; }
 
-  /* Prevent page scroll while emulator hidden */
+  /* Prevent page scroll while emulator hidden and during preload */
   html.no-scroll, body.no-scroll { overflow-y:hidden; }
 
   main { width:min(1280px,95vw); margin:0 auto; padding:10px; }
   section { margin:10px 0; }
 
-  /* Loading strip */
-  #loading { padding:4px 0; margin:0; }
-  #status { font-size:13px; margin:4px 0; }
-  progress { width:220px; height:10px; vertical-align:middle; }
+  /* -------- Full-screen loading overlay -------- */
+  #loadingOverlay{
+    position:fixed; inset:0; z-index:var(--overlay-z);
+    display:flex; align-items:center; justify-content:center;
+    background:#fff;
+  }
+  #loadingCard{
+    width:min(560px, 90vw);
+    border:2px solid #000; padding:18px; box-sizing:border-box;
+    background:#fff; color:#000;
+  }
+  #loadingTitle{ margin:0 0 8px 0; font-size:18px; }
+  #status{ font-size:13px; margin:6px 0 10px 0; }
+  progress { width:100%; height:12px; vertical-align:middle; }
+  #metaRow{ display:flex; justify-content:space-between; font-size:12px; margin-top:6px; color:#333; }
+
+  /* Spinner */
+  .spinnerWrap{ display:flex; align-items:center; gap:12px; margin:10px 0 2px; }
+  .spinner{
+    width:18px; height:18px; border:2px solid #000; border-right-color:transparent;
+    border-radius:50%; animation:spin .9s linear infinite;
+  }
+  @keyframes spin{ to { transform:rotate(360deg); } }
 
   /* Workspace */
   #workspace { display:flex; flex-direction:column; gap:8px; padding-bottom:120px; }
@@ -128,14 +148,24 @@
 </script>
 </head>
 <body class="no-scroll">
-<main>
-  <section id="loading">
-    <div id="status">Preparing emulator…</div>
-    <progress id="prog" value="0" max="100"></progress>
-    <span id="progText"></span>
-    <div id="coiNote" style="font-size:12px;color:#333;"></div>
-  </section>
 
+<!-- Full-screen preload overlay -->
+<div id="loadingOverlay" aria-live="polite">
+  <div id="loadingCard">
+    <h2 id="loadingTitle">Preparing DOS environment…</h2>
+    <div class="spinnerWrap">
+      <div class="spinner" aria-hidden="true"></div>
+      <div id="status">Initializing…</div>
+    </div>
+    <progress id="prog" value="0" max="100"></progress>
+    <div id="metaRow">
+      <div id="progText">0/0</div>
+      <div id="coiNote"></div>
+    </div>
+  </div>
+</div>
+
+<main>
   <section id="workspace" class="no-safe">
     <div class="row" id="nameRow">
       <input id="fileName" type="text" value="base.asm" aria-label="File name">
@@ -206,6 +236,7 @@ END start
   const workspace = document.getElementById('workspace');
   const emuSection = document.getElementById('emuSection');
   const mainEl = document.querySelector('main');
+  const overlay = document.getElementById('loadingOverlay');
 
   /* ===== CodeMirror (no folding) ===== */
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
@@ -237,18 +268,15 @@ END start
 
   /* ===== Editor height calculus ===== */
   const nameRow = document.getElementById('nameRow');
-  const loadingBox = document.getElementById('loading');
-
   function resizeEditor() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
     const mainPad = getComputedStyle(mainEl);
     const pad = parseInt(mainPad.paddingTop) + parseInt(mainPad.paddingBottom);
     const wsStyle = getComputedStyle(workspace);
     const wsMargins = parseInt(wsStyle.marginTop) + parseInt(wsStyle.marginBottom);
-    const loadingH = (loadingBox && loadingBox.offsetParent !== null) ? loadingBox.offsetHeight : 0;
     const nameH = nameRow.offsetHeight;
     const SAFE = workspace.classList.contains('no-safe') ? 0 : 120;
-    const target = Math.max(180, vh - pad - wsMargins - loadingH - nameH - SAFE);
+    const target = Math.max(180, vh - pad - wsMargins - nameH - SAFE);
     cm.setSize(null, target);
     cm.refresh();
   }
@@ -363,10 +391,11 @@ BUILD
     })();
   }
 
-  /* Preload emulator + tools into CacheStorage, keep needed bytes in memory */
+  /* Full-screen preload with progress */
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
   const progText = document.getElementById('progText');
+  const coiNote = document.getElementById('coiNote');
 
   async function preloadAll(){
     status.textContent = 'Caching emulator and tools…';
@@ -386,6 +415,7 @@ BUILD
     let total = files.length, done = 0;
     prog.max = total; prog.value = 0; progText.textContent = `0/${total}`;
 
+    // use cached ones first
     for (const f of files) {
       const hit = await cache.match(f.url);
       if (hit) {
@@ -393,8 +423,10 @@ BUILD
         if (f.keepInMemory) mem.set(f.path, new Uint8Array(await hit.clone().arrayBuffer()));
       }
     }
+    // fetch missing
     for (const f of files) {
       if (await cache.match(f.url)) continue;
+      status.textContent = `Downloading ${f.url.split('/').pop()}…`;
       const resp = await fetch(new Request(f.url, { cache:'reload' })).catch(()=>null);
       if (!resp || !resp.ok) {
         if (f.required) throw new Error('Network error ' + f.url);
@@ -404,17 +436,22 @@ BUILD
       }
       done++; prog.value = done; progText.textContent = `${done}/${total}`;
     }
+    // ensure all keepInMemory are in RAM
     for (const f of files) {
       if (!f.keepInMemory || mem.has(f.path)) continue;
       const hit = await cache.match(f.url);
       if (hit) mem.set(f.path, new Uint8Array(await hit.clone().arrayBuffer()));
     }
+    // publish in global
     toolBufs = new Map();
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
-    document.getElementById('loading').style.display = 'none';
+    // finished -> hide overlay and enable UI
     document.getElementById('startBtn').disabled = false;
+    overlay.style.display = 'none';             // hide full-screen loader
+    status.textContent = 'Ready';               // not visible now but set anyway
 
+    // keep page non-scroll until Start to match previous behavior
     resizeEditor();
   }
 
@@ -492,19 +529,22 @@ BUILD
     setTimeout(()=>location.reload(), 250);
   });
 
-  // prevent scroll initially
-  htmlEl.classList.add('no-scroll');
-  bodyEl.classList.add('no-scroll');
-
+  // show overlay immediately; proceed even if COI not ready
   (async ()=>{
-    // proceed even if COI not ready
+    // Helpful note if not isolated in time
     const t0 = performance.now();
     while (performance.now() - t0 < 8000) {
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) break;
       await new Promise(r=>setTimeout(r,120));
     }
+    if (!(navigator.serviceWorker?.controller && self.crossOriginIsolated)) {
+      coiNote.textContent = 'Tip: if Start fails, hard-refresh once.';
+    }
     try { await preloadAll(); }
-    catch (e) { status.textContent = 'Preload failed. Hard-refresh.'; console.error(e); }
+    catch (e) {
+      status.textContent = 'Preload failed. Hard-refresh.';
+      console.error(e);
+    }
   })();
 })();
 </script>
