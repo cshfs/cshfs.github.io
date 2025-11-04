@@ -5,31 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>DOSBox — Editor + Run</title>
 
-<!-- js-dos (local) -->
+<!-- js-dos (local in /dosbox) -->
 <link rel="stylesheet" href="js-dos.css" />
 <script src="js-dos.js"></script>
 
-<!-- CodeMirror 5 (SELF-HOSTED IN /dosbox/) -->
+<!-- CodeMirror 5 core (local in /dosbox) -->
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
+
+<!-- Folding addons (local in /dosbox) -->
+<link rel="stylesheet" href="foldgutter.min.css">
+<script src="foldcode.min.js"></script>
+<script src="foldgutter.min.js"></script>
+<script src="indent-fold.min.js"></script>
+
+<!-- TASM mode (your local file) -->
 <script src="tasm.js"></script>
 
 <style>
-  /* Pure white everywhere */
   html, body { height: 100%; background:#fff; }
   body { margin: 0; color:#000; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
 
-  /* Wider page so editor isn't cramped */
   main { width: min(1280px, 95vw); margin: 0 auto; padding: 12px; background:#fff; }
   section { margin: 12px 0; background:#fff; }
   h1 { display: none; }
 
-  /* Loading strip */
   #loading { padding: 8px 0; }
   #status { font-size: 14px; margin: 6px 0; }
   progress { width: 260px; height: 12px; vertical-align: middle; }
 
-  /* Full-height workspace with generous bottom safety so buttons never cut off */
   #workspace {
     min-height: 100vh;
     display: flex;
@@ -39,7 +43,6 @@
     margin-bottom: env(safe-area-inset-bottom, 0px);
   }
 
-  /* Controls */
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .btn { font: inherit; padding: 10px 14px; background:#111; color:#fff; border:2px solid #111; cursor:pointer; }
   .btn:hover { background:#000; border-color:#000; }
@@ -48,46 +51,43 @@
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-  /* Editor container grows; actual height set via JS (setSize) */
   .editor-wrap { flex: 1; min-height: 0; display: flex; }
   .CodeMirror { width: 100%; border:2px solid #111; background:#fff; color:#000; transition: opacity .15s ease; }
   .CodeMirror-focused { outline: 2px solid #1115; }
   .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
 
-  /* DOSBox area. Size set by JS; canvas stretched to fit container */
+  /* fold gutter visible */
+  .CodeMirror-gutters { border-right:2px solid #111; }
+  .CodeMirror-foldgutter { width: 14px; }
+  .CodeMirror-foldmarker { cursor: pointer; }
+
   #dosbox {
     background:#000;
     border:2px solid #111;
     width: 100%;
-    height: 600px;            /* default before JS runs */
-    aspect-ratio: 1050/600;   /* keeps ratio if CSS used elsewhere */
+    height: 600px;
+    aspect-ratio: 1050/600;
     position: relative;
   }
   #dosbox canvas { width:100% !important; height:100% !important; display:block; }
 
   ul { margin: 6px 0 0 18px; padding: 0; background:#fff; }
 
-  /* Force js-dos wrappers to white */
   html, body, main, section { background:#fff !important; }
   #dosbox *, .dosbox, .dosbox-root, .dosbox-container, .dosbox-viewport,
-  .dosbox-overlay, .dosbox-loader {
-    background:#fff !important; box-shadow:none !important; border-color:#fff !important;
-  }
+  .dosbox-overlay, .dosbox-loader { background:#fff !important; box-shadow:none !important; border-color:#fff !important; }
   #dosbox canvas { background:#000 !important; }
 
-  /* Medium contrast styling for TASM mode */
-
-/* Notepad++-like colors */
-.cm-builtin       { color:#0070C0; }   /* opcodes like mov */
-.cm-variable-2    { color:#0070C0; }   /* registers ax, ds */
-.cm-tasm-directive{ color:#7A3E9D; }   /* IDEAL, MODEL, DATASEG, CODESEG, END */
-.cm-tasm-label    { color:#7A3E9D; font-weight:600; } /* start: exit: */
-.cm-keyword       { color:#0000FF; }   /* DB, DW, PROC, PTR, ASSUME */
-.cm-atom          { color:#008080; font-style:italic; } /* MODEL small/tiny, @data */
-.cm-number        { color:#C05000; }
-.cm-comment       { color:#008000; }   /* green like N++ */
-.cm-string        { color:#A31515; }
-
+  /* Notepad++-like colors */
+  .cm-builtin       { color:#0070C0; }
+  .cm-variable-2    { color:#0070C0; }
+  .cm-tasm-directive{ color:#7A3E9D; }
+  .cm-tasm-label    { color:#7A3E9D; font-weight:600; }
+  .cm-keyword       { color:#0000FF; }
+  .cm-atom          { color:#008080; font-style:italic; }
+  .cm-number        { color:#C05000; }
+  .cm-comment       { color:#008000; }
+  .cm-string        { color:#A31515; }
 </style>
 
 <script>
@@ -107,7 +107,6 @@
 </head>
 <body>
 <main>
-  <!-- Loading -->
   <section id="loading">
     <div id="status">Preparing emulator…</div>
     <progress id="prog" value="0" max="100"></progress>
@@ -115,43 +114,60 @@
     <div id="coiNote" style="font-size:13px;color:#333;"></div>
   </section>
 
-  <!-- Full-height workspace: controls + editor + top buttons -->
   <section id="workspace">
     <div class="row" id="nameRow">
-      <input id="fileName" type="text" value="HELLO.ASM" aria-label="File name">
+      <input id="fileName" type="text" value="base.asm" aria-label="File name">
       <button id="saveBtn" class="btn" type="button">Download .ASM</button>
       <button id="loadBtn" class="btn" type="button">Load .ASM</button>
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
     </div>
 
     <div class="editor-wrap">
-      <textarea id="editorTA">; 16-bit DOS example for TASM/TLINK
-.MODEL  small
-.STACK  100h
-.DATA
-msg db 'hello this is dogs!$'
-.CODE
-main PROC
+      <textarea id="editorTA">IDEAL
+MODEL small
+STACK 100h
+DATASEG
+; --------------------------
+; Your variables here
+; --------------------------
+msg db 'Hello!$'
+
+CODESEG
+start:
   mov ax, @data
   mov ds, ax
+; --------------------------
+; Your code here
+; --------------------------
+  call printHello
+  
+  
+exit:
+  mov ax, 4c00h
+  int 21h
+
+; --------------------------
+; Your procedures here
+; --------------------------
+Proc printHello
   mov dx, OFFSET msg
   mov ah, 09h
   int 21h
   mov ax, 4C00h
   int 21h
-main ENDP
-END main
+  ret
+endp
+
+END start
 </textarea>
     </div>
 
     <div class="row" id="topControls">
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
       <button id="startBtn" class="btn" type="button" disabled>Start</button>
-      <!-- Stop is below DOSBox -->
     </div>
   </section>
 
-  <!-- DOSBox area (below the fold) -->
   <section id="emuSection">
     <div id="dosbox" aria-label="DOSBox frame"></div>
     <ul id="fileList"></ul>
@@ -169,8 +185,18 @@ END main
   const workspace = document.getElementById('workspace');
   const mainEl = document.querySelector('main');
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
-    lineNumbers: true, mode: 'tasm', indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: false,
+    lineNumbers: true,
+    mode: 'tasm',
+    indentUnit: 2,
+    tabSize: 2,
+    indentWithTabs: false,
+    readOnly: false,
+    /* folding by indentation */
+    foldGutter: true,
+    gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
+  /* make indent-based folding the default scanner */
+  cm.setOption("foldOptions", { rangeFinder: CodeMirror.fold.indent });
 
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
@@ -201,12 +227,11 @@ END main
   if (savedName) fileNameEl.value = savedName;
   if (savedText) cm.setValue(savedText);
 
-  /* ---------- Editor sizing so buttons never cut off ---------- */
   const nameRow = document.getElementById('nameRow');
   const topControls = document.getElementById('topControls');
   function resizeEditor() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    const SAFE = 140; // must match CSS padding-bottom
+    const SAFE = 140;
     const loadingH = (loadingBox && loadingBox.offsetParent !== null) ? loadingBox.offsetHeight : 0;
     const nameH = nameRow ? nameRow.offsetHeight : 0;
     const ctrlH = topControls ? topControls.offsetHeight : 0;
@@ -219,50 +244,29 @@ END main
   setTimeout(resizeEditor, 0);
 
   function autoDetectTasm(filename) {
-  if (filename && filename.toLowerCase().endsWith(".asm")) {
-    cm.setOption("mode", "tasm");
-  } else {
-    cm.setOption("mode", null); // plain text
+    if (filename && filename.toLowerCase().endsWith(".asm")) cm.setOption("mode","tasm");
+    else cm.setOption("mode", null);
   }
-}
+  fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
+  autoDetectTasm(fileNameEl.value);
 
-// Call whenever filename changes
-fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
-autoDetectTasm(fileNameEl.value);
-
-  /* ---------- DOSBox: scale to fit viewport on small screens ---------- */
-  const AR_W = 1050, AR_H = 600; // DOSBox desired aspect
+  const AR_W = 1050, AR_H = 600;
   function sizeDosbox() {
-    // Available width inside the page
     const pageW = mainEl.clientWidth;
-
-    // Available height in the viewport for DOSBox + a small margin + stop row
     const viewportH = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    const stopRow = 56;   // approx height of the stop button row
-    const margin = 24;    // breathing room
+    const stopRow = 56, margin = 24;
     const availH = Math.max(240, viewportH - stopRow - margin);
-
-    // Compute the largest size that fits both width and height while keeping aspect
     const hFromW = Math.floor(pageW * (AR_H / AR_W));
     let targetW, targetH;
-    if (hFromW <= availH) {
-      targetW = pageW;
-      targetH = hFromW;
-    } else {
-      targetH = availH;
-      targetW = Math.floor(availH * (AR_W / AR_H));
-    }
-
-    // Apply exact pixel size
+    if (hFromW <= availH) { targetW = pageW; targetH = hFromW; }
+    else { targetH = availH; targetW = Math.floor(availH * (AR_W / AR_H)); }
     elDos.style.width = targetW + 'px';
     elDos.style.height = targetH + 'px';
   }
   window.addEventListener('resize', sizeDosbox);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', sizeDosbox);
-  // Initial sizing
   setTimeout(sizeDosbox, 0);
 
-  /* ---------- Helpers ---------- */
   const toDos83 = (name)=>{
     const i = name.lastIndexOf('.');
     let b = (i>=0?name.slice(0,i):name).toUpperCase();
@@ -317,7 +321,6 @@ BUILD
       kiosk: true,
       autostart: true
     });
-    // Ensure container is sized once canvas attaches
     setTimeout(sizeDosbox, 50);
   }
 
@@ -352,7 +355,7 @@ BUILD
       { path:'TD.EXE',       url:'tools/TD.EXE',       required:false, keepInMemory:true },
       { path:'TDCONFIG.TD',  url:'tools/TDCONFIG.TD',  required:false, keepInMemory:true },
     ];
-    const cache = await caches.open(CACHE_NAME);
+    const cache = await caches.open('dosbox-prewarm-v10');
     const mem = new Map();
 
     let total = files.length, done = 0;
@@ -397,12 +400,12 @@ BUILD
     document.getElementById('loading').style.display = 'none';
     startBtn.disabled = false;
 
-    resizeEditor(); // recalc after loading strip collapses
-    sizeDosbox();   // ensure DOSBox fits current viewport
+    resizeEditor();
+    sizeDosbox();
   }
 
   saveBtn.addEventListener('click', ()=>{
-    const name = toDos83(fileNameEl.value || 'HELLO.ASM');
+    const name = toDos83(fileNameEl.value || 'BASE.ASM');
     const blob = new Blob([cm.getValue()], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -432,7 +435,7 @@ BUILD
 
   startBtn.addEventListener('click', async ()=>{
     try {
-      const nameRaw = (fileNameEl.value || 'HELLO.ASM').trim();
+      const nameRaw = (fileNameEl.value || 'base.asm').trim();
       localStorage.setItem(LS_KEY_NAME, nameRaw);
       localStorage.setItem(LS_KEY_TEXT, cm.getValue());
 
@@ -442,7 +445,7 @@ BUILD
       startBtn.classList.add('disabled');
 
       const dosAsmName = toDos83(nameRaw);
-      const asmBytes = encoder.encode(cm.getValue());
+      const asmBytes = new TextEncoder().encode(cm.getValue());
 
       const initFs = [
         { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
