@@ -23,27 +23,33 @@
 <script src="tasm.js"></script>
 
 <style>
-  html, body { height: 100%; background:#fff; }
-  body { margin: 0; color:#000; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+  /* Hard-force white everywhere */
+  :root, html, body { height: 100%; background:#fff !important; color:#000; }
+  body, main, section, #dosbox, #dosbox * { background:#fff !important; }
+  * { border-color: #111; }
+
+  body { margin: 0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
 
   main { width: min(1280px, 95vw); margin: 0 auto; padding: 12px; }
   section { margin: 12px 0; }
   h1 { display: none; }
 
+  /* Loading */
   #loading { padding: 8px 0; }
   #status { font-size: 14px; margin: 6px 0; }
   progress { width: 260px; height: 12px; vertical-align: middle; }
 
+  /* Workspace: bottom padding used only after Start so buttons don't cut off */
   #workspace {
-    min-height: 100vh;
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding-bottom: 140px; /* restored after Start */
+    padding-bottom: 140px;           /* used when emulator visible */
+    margin-bottom: env(safe-area-inset-bottom, 0px);
   }
-  /* when emulator hidden remove bottom safety */
-  #workspace.no-safe { padding-bottom: 0; }
+  #workspace.no-safe { padding-bottom: 0; }  /* when emulator hidden */
 
+  /* Controls */
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .btn { font: inherit; padding: 10px 14px; background:#111; color:#fff; border:2px solid #111; cursor:pointer; }
   .btn:hover { background:#000; border-color:#000; }
@@ -52,35 +58,34 @@
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-  .editor-wrap { flex: 1; min-height: 0; display: flex; }
-  .CodeMirror { width: 100%; border:2px solid #111; background:#fff; color:#000; }
+  /* Editor */
+  .editor-wrap { min-height: 0; display: flex; }
+  .CodeMirror { width: 100%; border:2px solid #111; }
   .CodeMirror-focused { outline: 2px solid #1115; }
   .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
-
   .CodeMirror-gutters { border-right:2px solid #111; }
   .CodeMirror-foldgutter { width: 14px; }
 
-  /* hidden until Start */
+  /* Ensure all CM scroll surfaces are white */
+  .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters { background:#fff !important; color:#000; }
+
+  /* Emulator hidden until Start */
   #emuSection { display:none; }
 
   /* DOSBox frame */
   #dosbox {
-    background:#000;
     border:2px solid #111;
     width: 100%;
     height: 600px;
     aspect-ratio: 1050/600;
     position: relative;
   }
-  #dosbox canvas { width:100% !important; height:100% !important; display:block; }
+  #dosbox canvas { width:100% !important; height:100% !important; display:block; background:#000 !important; }
 
-  /* Force ALL js-dos wrappers to white regardless of js-dos.css */
-  :where(#dosbox, #dosbox *) { color:#000 !important; }
+  /* Force js-dos wrappers to white regardless of their CSS */
   :where(.dosbox-root, .dosbox-container, .dosbox-viewport, .dosbox-overlay, .dosbox-loader, .dosbox) {
     background:#fff !important; box-shadow:none !important; border-color:#fff !important;
   }
-  /* keep the actual emulator surface black */
-  #dosbox canvas { background:#000 !important; }
 
   /* Notepad++-like colors for TASM */
   .cm-builtin       { color:#0070C0; }
@@ -125,7 +130,6 @@
       <button id="saveBtn" class="btn" type="button">Download .ASM</button>
       <button id="loadBtn" class="btn" type="button">Load .ASM</button>
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
-      <!-- moved up: assets + Start -->
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
       <button id="startBtn" class="btn" type="button" disabled>Start</button>
     </div>
@@ -227,12 +231,22 @@ END start
 
   const nameRow = document.getElementById('nameRow');
 
+  /* Compute exact editor height considering paddings/margins + rows */
   function resizeEditor() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    const SAFE = workspace.classList.contains('no-safe') ? 0 : 140;
+
+    const mainStyle = getComputedStyle(mainEl);
+    const pad = parseInt(mainStyle.paddingTop) + parseInt(mainStyle.paddingBottom);
+
+    const workspaceStyle = getComputedStyle(workspace);
+    const wsMargin = parseInt(workspaceStyle.marginTop) + parseInt(workspaceStyle.marginBottom);
+
     const loadingH = (loadingBox && loadingBox.offsetParent !== null) ? loadingBox.offsetHeight : 0;
     const nameH = nameRow.offsetHeight;
-    const target = Math.max(200, vh - loadingH - nameH - SAFE);
+
+    const SAFE = workspace.classList.contains('no-safe') ? 0 : 140;
+
+    const target = Math.max(200, vh - pad - wsMargin - loadingH - nameH - SAFE);
     cm.setSize(null, target);
     cm.refresh();
   }
