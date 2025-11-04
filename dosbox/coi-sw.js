@@ -3,7 +3,7 @@
 
 const COOP = 'same-origin';
 const COEP = 'require-corp';
-const CACHE_NAME = 'dosbox-prewarm-v12';
+const CACHE_NAME = 'dosbox-prewarm-v13';
 
 const PRECACHE = [
   // HTML / entry (serve with COOP/COEP, no long cache)
