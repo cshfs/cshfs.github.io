@@ -39,7 +39,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding-bottom: 140px;
+    padding-bottom: 140px; /* restored after Start */
   }
   /* when emulator hidden remove bottom safety */
   #workspace.no-safe { padding-bottom: 0; }
@@ -63,6 +63,7 @@
   /* hidden until Start */
   #emuSection { display:none; }
 
+  /* DOSBox frame */
   #dosbox {
     background:#000;
     border:2px solid #111;
@@ -73,6 +74,15 @@
   }
   #dosbox canvas { width:100% !important; height:100% !important; display:block; }
 
+  /* Force ALL js-dos wrappers to white regardless of js-dos.css */
+  :where(#dosbox, #dosbox *) { color:#000 !important; }
+  :where(.dosbox-root, .dosbox-container, .dosbox-viewport, .dosbox-overlay, .dosbox-loader, .dosbox) {
+    background:#fff !important; box-shadow:none !important; border-color:#fff !important;
+  }
+  /* keep the actual emulator surface black */
+  #dosbox canvas { background:#000 !important; }
+
+  /* Notepad++-like colors for TASM */
   .cm-builtin       { color:#0070C0; }
   .cm-variable-2    { color:#0070C0; }
   .cm-tasm-directive{ color:#7A3E9D; }
@@ -115,6 +125,9 @@
       <button id="saveBtn" class="btn" type="button">Download .ASM</button>
       <button id="loadBtn" class="btn" type="button">Load .ASM</button>
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
+      <!-- moved up: assets + Start -->
+      <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
+      <button id="startBtn" class="btn" type="button" disabled>Start</button>
     </div>
 
     <div class="editor-wrap">
@@ -156,15 +169,10 @@ endp
 END start
 </textarea>
     </div>
-
-    <div class="row" id="topControls">
-      <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
-      <button id="startBtn" class="btn" type="button" disabled>Start</button>
-    </div>
   </section>
 
   <section id="emuSection">
-    <div id="dosbox"></div>
+    <div id="dosbox" aria-label="DOSBox frame"></div>
     <ul id="fileList"></ul>
     <div class="row" style="margin-top:10px;">
       <button id="stopBtn" class="btn" type="button">Stop</button>
@@ -180,6 +188,7 @@ END start
   const workspace = document.getElementById('workspace');
   const emuSection = document.getElementById('emuSection');
   const mainEl = document.querySelector('main');
+
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true,
     mode: 'tasm',
@@ -217,15 +226,13 @@ END start
   if (savedText) cm.setValue(savedText);
 
   const nameRow = document.getElementById('nameRow');
-  const topControls = document.getElementById('topControls');
 
   function resizeEditor() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
     const SAFE = workspace.classList.contains('no-safe') ? 0 : 140;
     const loadingH = (loadingBox && loadingBox.offsetParent !== null) ? loadingBox.offsetHeight : 0;
     const nameH = nameRow.offsetHeight;
-    const ctrlH = topControls.offsetHeight;
-    const target = Math.max(200, vh - loadingH - nameH - ctrlH - SAFE);
+    const target = Math.max(200, vh - loadingH - nameH - SAFE);
     cm.setSize(null, target);
     cm.refresh();
   }
