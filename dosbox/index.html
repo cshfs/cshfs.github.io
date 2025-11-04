@@ -13,18 +13,13 @@
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
-<!-- Folding addons: INDENT ONLY (local) -->
-<link rel="stylesheet" href="foldgutter.min.css">
-<script src="foldcode.min.js"></script>
-<script src="foldgutter.min.js"></script>
-<script src="indent-fold.min.js"></script>
-
 <!-- TASM mode -->
 <script src="tasm.js"></script>
 
 <style>
   :root{
-    --ctl-h: 28px; /* exact outer height for input + buttons */
+    --ctl-h: 28px;  /* exact outer height for input + buttons */
+    --ctl-font: 12px; /* shared control font size (buttons + input) */
   }
 
   /* Force white everywhere */
@@ -50,31 +45,30 @@
   /* Controls row */
   .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
 
-  /* Neutral buttons — flat, strict height */
+  /* Buttons — flat, strict height, unified font */
   .btn{
     box-sizing:border-box;
     display:inline-flex; align-items:center; justify-content:center;
-    font:inherit; font-size:12px;
-    height:var(--ctl-h);
-    padding:0 10px;
-    border:2px solid #000; border-radius:0;
-    background:#fff; color:#000; cursor:pointer;
+    font: inherit; font-size: var(--ctl-font) !important;
+    height:var(--ctl-h) !important;
+    padding:0 10px !important;
+    border:2px solid #000 !important; border-radius:0 !important;
+    background:#fff !important; color:#000 !important; cursor:pointer;
+    min-height:0 !important; /* override js-dos.css */
   }
-  .btn:hover{ background:#f4f4f4; }
+  .btn:hover{ background:#f4f4f4 !important; }
   .btn[disabled]{ opacity:.55; cursor:not-allowed; }
 
-  /* Kill js-dos.css min-height */
-  button, .btn, label.file.btn { min-height:0 !important; }
-
-  /* Filename input — same exact outer height */
+  /* Filename input — same exact height + same font as buttons */
   #fileName{
     box-sizing:border-box;
     -webkit-appearance:none; appearance:none;
-    font:inherit; font-size:18px;
-    height:var(--ctl-h);
-    padding:0 10px;
-    border:2px solid #000; border-radius:0;
+    font: inherit; font-size: var(--ctl-font) !important;
+    height:var(--ctl-h) !important;
+    padding:0 10px !important;
+    border:2px solid #000 !important; border-radius:0 !important;
     width:260px; background:#fff; color:#000;
+    min-height:0 !important; /* override js-dos.css */
   }
 
   label.file{ position:relative; }
@@ -86,13 +80,7 @@
   .CodeMirror-focused{ outline:2px solid #1115; }
   .cm-locked .CodeMirror{ opacity:.5; pointer-events:none; }
   .CodeMirror-gutters{ border-right:2px solid #000; }
-  .CodeMirror-foldgutter{ width:16px; cursor:pointer; }
   .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters{ background:#fff !important; color:#000; }
-
-  /* Fold markers */
-  .CodeMirror-foldmarker{ color:#000; font-weight:700; cursor:pointer; }
-  .CodeMirror-foldgutter-open:after{ content:"▾"; color:#000; }
-  .CodeMirror-foldgutter-closed:after{ content:"▸"; color:#000; }
 
   /* Emulator hidden until Start */
   #emuSection{ display:none; }
@@ -219,22 +207,12 @@ END start
   const emuSection = document.getElementById('emuSection');
   const mainEl = document.querySelector('main');
 
-  /* ===== CodeMirror ===== */
+  /* ===== CodeMirror (no folding) ===== */
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true,
     mode: 'tasm',
     indentUnit: 2,
-    tabSize: 2,
-    foldGutter: true,
-    gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"],
-    foldOptions: { rangeFinder: CodeMirror.fold.indent }   // indent-fold only
-  });
-
-  // Gutter click -> indent-fold
-  cm.on('gutterClick', (inst, line, gutter) => {
-    if (gutter === 'CodeMirror-foldgutter') {
-      inst.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: CodeMirror.fold.indent });
-    }
+    tabSize: 2
   });
 
   /* ===== Restore/save filename + text ===== */
