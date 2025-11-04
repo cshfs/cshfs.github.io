@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
-<!-- Folding addons (local) -->
+<!-- Folding addons (local, files in /dosbox) -->
 <link rel="stylesheet" href="foldgutter.min.css">
 <script src="foldcode.min.js"></script>
 <script src="foldgutter.min.js"></script>
@@ -23,6 +23,11 @@
 <script src="tasm.js"></script>
 
 <style>
+  :root {
+    /* unified control height for buttons and filename input */
+    --ctl-h: 34px;
+  }
+
   /* Force white everywhere */
   :root, html, body { height: 100%; background:#fff !important; color:#000; }
   body { margin: 0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
@@ -39,22 +44,41 @@
   #status { font-size: 13px; margin: 4px 0; }
   progress { width: 220px; height: 10px; vertical-align: middle; }
 
-  /* Workspace: padding-bottom only when emulator visible */
+  /* Workspace */
   #workspace {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding-bottom: 120px; /* safety only when emulator visible */
+    padding-bottom: 120px; /* used only when emulator visible */
     margin-bottom: env(safe-area-inset-bottom, 0px);
   }
   #workspace.no-safe { padding-bottom: 0; }
 
-  /* Controls — compact */
+  /* Controls — compact and unified height */
   .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .btn { font: inherit; padding: 6px 10px; font-size: 14px; background:#111; color:#fff; border:2px solid #111; cursor:pointer; }
+  .btn {
+    font: inherit;
+    font-size: 14px;
+    height: var(--ctl-h);
+    line-height: calc(var(--ctl-h) - 4px); /* approx minus borders */
+    padding: 0 10px;
+    background:#111; color:#fff; border:2px solid #111; cursor:pointer;
+  }
   .btn:hover { background:#000; border-color:#000; }
   .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
-  input[type="text"] { font: inherit; padding: 6px 8px; height: 28px; font-size: 14px; border:2px solid #111; width: 240px; background:#fff; color:#000; }
+
+  /* Filename input: 18px font but same total height as buttons */
+  #fileName {
+    font: inherit;
+    font-size: 18px;
+    height: var(--ctl-h);
+    padding: 0 10px;
+    border:2px solid #111;
+    width: 260px;
+    background:#fff; color:#000;
+    box-sizing: border-box;
+  }
+
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
@@ -64,7 +88,7 @@
   .CodeMirror-focused { outline: 2px solid #1115; }
   .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
   .CodeMirror-gutters { border-right:2px solid #111; }
-  .CodeMirror-foldgutter { width: 14px; }
+  .CodeMirror-foldgutter { width: 14px; cursor: pointer; }
   .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters { background:#fff !important; color:#000; }
 
   /* Emulator hidden until Start */
@@ -202,7 +226,7 @@ END start
     gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
 
-  /* Custom fold helper for TASM labels/PROC + combine with indent-fold */
+  /* Custom fold helper for TASM labels/PROC; then fallback to indent. */
   (function() {
     function tasmFold(cmInst, start) {
       const lineText = cmInst.getLine(start.line) || "";
@@ -228,9 +252,13 @@ END start
     CodeMirror.registerHelper("fold", "tasm", tasmFold);
   })();
 
-  cm.setOption("foldOptions", {
-    rangeFinder: CodeMirror.fold.combine(CodeMirror.fold.tasm, CodeMirror.fold.indent)
-  });
+  /* Use a simple OR instead of combine to avoid missing helper edge-cases */
+  function tasmOrIndent(cmInst, start) {
+    return (CodeMirror.fold.tasm && CodeMirror.fold.tasm(cmInst, start)) ||
+           (CodeMirror.fold.indent && CodeMirror.fold.indent(cmInst, start)) ||
+           null;
+  }
+  cm.setOption("foldOptions", { rangeFinder: tasmOrIndent });
 
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
@@ -281,14 +309,13 @@ END start
       if (!data) return;
       const folds = JSON.parse(data);
       folds.forEach(([from]) => {
-        cm.foldCode(CodeMirror.Pos(from, 0), null, "fold");
+        cm.foldCode(CodeMirror.Pos(from, 0), { rangeFinder: tasmOrIndent });
       });
     } catch {}
   }
-  // Save folds on gutter click and on window unload
   cm.on('gutterClick', (cmI, line, gutter) => {
     if (gutter === 'CodeMirror-foldgutter') {
-      cmI.foldCode(CodeMirror.Pos(line, 0));
+      cmI.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: tasmOrIndent });
       setTimeout(saveFolds, 0);
     }
   });
@@ -385,21 +412,38 @@ BUILD
       kiosk: true,
       autostart: true
     });
-    setTimeout(sizeDosbox, 50);
+    // allow layout to settle then size
+    requestAnimationFrame(() => setTimeout(sizeDosbox, 50));
   }
 
-  /* Reliable scroll to DOSBox after start */
-  function waitForCanvasAndScroll() {
-    const t0 = performance.now();
-    (function tick(){
-      const c = document.querySelector('#dosbox canvas');
-      if (c) {
-        emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        setTimeout(()=>window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 30);
-      } else if (performance.now() - t0 < 5000) {
-        requestAnimationFrame(tick);
-      }
-    })();
+  /* Reliable reveal + scroll after Start */
+  function revealAndScroll() {
+    // reveal emulator and restore page scrolling
+    htmlEl.classList.remove('no-scroll');
+    bodyEl.classList.remove('no-scroll');
+    emuSection.style.display = 'block';
+    workspace.classList.remove('no-safe');
+
+    // let layout settle, then scroll hard to bottom
+    requestAnimationFrame(() => {
+      resizeEditor();
+      sizeDosbox();
+      requestAnimationFrame(() => {
+        const bottom = Math.max(
+          document.body.scrollHeight,
+          document.documentElement.scrollHeight
+        );
+        window.scrollTo({ top: bottom, behavior: 'smooth' });
+        // final nudge after canvas attaches
+        setTimeout(() => {
+          const bottom2 = Math.max(
+            document.body.scrollHeight,
+            document.documentElement.scrollHeight
+          );
+          window.scrollTo({ top: bottom2, behavior: 'smooth' });
+        }, 250);
+      });
+    });
   }
 
   async function waitForCOIController(timeoutMs=8000){
@@ -499,87 +543,26 @@ BUILD
       startBtn.disabled = true;
       startBtn.classList.add('disabled');
 
-      // allow scroll and reveal emulator
-      htmlEl.classList.remove('no-scroll');
-      bodyEl.classList.remove('no-scroll');
-      emuSection.style.display = 'block';
-      workspace.classList.remove('no-safe');
-      resizeEditor();
+      // Reveal emulator and scroll
+      revealAndScroll();
 
-      const dosAsmName = (function toDos83(name){
-        const i = name.lastIndexOf('.');
-        let b = (i>=0?name.slice(0,i):name).toUpperCase();
-        let e = (i>=0?name.slice(i+1):'').toUpperCase();
-        const clean = s=>s.replace(/[^A-Z0-9]/g,'_');
-        b = clean(b).slice(0,8); e = clean(e).slice(0,3);
-        return e?`${b}.${e}`:b;
-      })(nameRaw);
+      const dosAsmName = toDos83(nameRaw);
       const asmBytes = encoder.encode(cm.getValue());
 
       const initFs = [
         { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
         { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
         { path: dosAsmName,  contents: asmBytes },
-        { path: 'BUILD.BAT', contents: (function buildBatFor(dosName){
-            const base = dosName.replace(/\.[^.]*$/,'');
-            const lines = [
-              '@echo off',
-              'echo Assembling ' + dosName,
-              'TASM /zi /q ' + dosName,
-              'if errorlevel 1 goto ERR',
-              'echo Linking ' + base + '.OBJ',
-              'TLINK /v ' + base + '.OBJ,,NUL,;',
-              'if errorlevel 1 goto ERR',
-              'echo Running ' + base + '.EXE',
-              base + '.EXE',
-              'echo.',
-              'goto END',
-              ':ERR',
-              'echo Build failed.',
-              ':END'
-            ];
-            return encoder.encode(lines.join("\r\n") + "\r\n");
-          })(dosAsmName) },
+        { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) },
       ];
       for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
         const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
       }
       for (const f of Array.from(bag.values())) {
-        initFs.push({ path: (function toDos83(name){
-            const i = name.lastIndexOf('.');
-            let b = (i>=0?name.slice(0,i):name).toUpperCase();
-            let e = (i>=0?name.slice(i+1):'').toUpperCase();
-            const clean = s=>s.replace(/[^A-Z0-9]/g,'_');
-            b = clean(b).slice(0,8); e = clean(e).slice(0,3);
-            return e?`${b}.${e}`:b;
-          })(f.name), contents: new Uint8Array(await f.arrayBuffer()) });
+        initFs.push({ path: toDos83(f.name), contents: new Uint8Array(await f.arrayBuffer()) });
       }
 
-      if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
-      elDos.innerHTML = '';
-      player = window.Dos(elDos, {
-        pathPrefix: "emulators/",
-        dosboxConf: `
-[sdl]
-fullscreen=false
-
-[autoexec]
-@echo off
-mount c .
-c:
-cls
-BUILD
-`,
-        initFs,
-        noCloud: true,
-        noNetworking: true,
-        kiosk: true,
-        autostart: true
-      });
-
-      // Reliable scroll
-      waitForCanvasAndScroll();
-      setTimeout(sizeDosbox, 80);
+      startDosWith(initFs);
 
     } catch (e) {
       console.error(e);
