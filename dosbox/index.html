@@ -9,25 +9,25 @@
 <link rel="stylesheet" href="js-dos.css" />
 <script src="js-dos.js"></script>
 
-<!-- CodeMirror 5 core (local in /dosbox) -->
+<!-- CodeMirror (local) -->
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
-<!-- Folding addons (local in /dosbox) -->
+<!-- Folding addons (local) -->
 <link rel="stylesheet" href="foldgutter.min.css">
 <script src="foldcode.min.js"></script>
 <script src="foldgutter.min.js"></script>
 <script src="indent-fold.min.js"></script>
 
-<!-- TASM mode (your local file) -->
+<!-- TASM mode -->
 <script src="tasm.js"></script>
 
 <style>
   html, body { height: 100%; background:#fff; }
   body { margin: 0; color:#000; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
 
-  main { width: min(1280px, 95vw); margin: 0 auto; padding: 12px; background:#fff; }
-  section { margin: 12px 0; background:#fff; }
+  main { width: min(1280px, 95vw); margin: 0 auto; padding: 12px; }
+  section { margin: 12px 0; }
   h1 { display: none; }
 
   #loading { padding: 8px 0; }
@@ -39,9 +39,10 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding-bottom: 140px; /* keep in sync with JS SAFE */
-    margin-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: 140px;
   }
+  /* when emulator hidden remove bottom safety */
+  #workspace.no-safe { padding-bottom: 0; }
 
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .btn { font: inherit; padding: 10px 14px; background:#111; color:#fff; border:2px solid #111; cursor:pointer; }
@@ -52,14 +53,15 @@
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
   .editor-wrap { flex: 1; min-height: 0; display: flex; }
-  .CodeMirror { width: 100%; border:2px solid #111; background:#fff; color:#000; transition: opacity .15s ease; }
+  .CodeMirror { width: 100%; border:2px solid #111; background:#fff; color:#000; }
   .CodeMirror-focused { outline: 2px solid #1115; }
   .cm-locked .CodeMirror { opacity: .5; pointer-events: none; }
 
-  /* fold gutter visible */
   .CodeMirror-gutters { border-right:2px solid #111; }
   .CodeMirror-foldgutter { width: 14px; }
-  .CodeMirror-foldmarker { cursor: pointer; }
+
+  /* hidden until Start */
+  #emuSection { display:none; }
 
   #dosbox {
     background:#000;
@@ -71,14 +73,6 @@
   }
   #dosbox canvas { width:100% !important; height:100% !important; display:block; }
 
-  ul { margin: 6px 0 0 18px; padding: 0; background:#fff; }
-
-  html, body, main, section { background:#fff !important; }
-  #dosbox *, .dosbox, .dosbox-root, .dosbox-container, .dosbox-viewport,
-  .dosbox-overlay, .dosbox-loader { background:#fff !important; box-shadow:none !important; border-color:#fff !important; }
-  #dosbox canvas { background:#000 !important; }
-
-  /* Notepad++-like colors */
   .cm-builtin       { color:#0070C0; }
   .cm-variable-2    { color:#0070C0; }
   .cm-tasm-directive{ color:#7A3E9D; }
@@ -91,7 +85,7 @@
 </style>
 
 <script>
-/* Service worker for COOP/COEP on GitHub Pages */
+/* COOP/COEP SW */
 (function registerCOI() {
   if (!('serviceWorker' in navigator)) return;
   const swUrl = new URL('./coi-sw.js', location.href);
@@ -114,7 +108,8 @@
     <div id="coiNote" style="font-size:13px;color:#333;"></div>
   </section>
 
-  <section id="workspace">
+  <!-- start hidden-safe -->
+  <section id="workspace" class="no-safe">
     <div class="row" id="nameRow">
       <input id="fileName" type="text" value="base.asm" aria-label="File name">
       <button id="saveBtn" class="btn" type="button">Download .ASM</button>
@@ -123,7 +118,7 @@
     </div>
 
     <div class="editor-wrap">
-      <textarea id="editorTA">IDEAL
+<textarea id="editorTA">IDEAL
 MODEL small
 STACK 100h
 DATASEG
@@ -169,7 +164,7 @@ END start
   </section>
 
   <section id="emuSection">
-    <div id="dosbox" aria-label="DOSBox frame"></div>
+    <div id="dosbox"></div>
     <ul id="fileList"></ul>
     <div class="row" style="margin-top:10px;">
       <button id="stopBtn" class="btn" type="button">Stop</button>
@@ -183,26 +178,22 @@ END start
   const LS_KEY_TEXT = 'dos_editor_text_v1';
 
   const workspace = document.getElementById('workspace');
+  const emuSection = document.getElementById('emuSection');
   const mainEl = document.querySelector('main');
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true,
     mode: 'tasm',
     indentUnit: 2,
     tabSize: 2,
-    indentWithTabs: false,
-    readOnly: false,
-    /* folding by indentation */
     foldGutter: true,
     gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
-  /* make indent-based folding the default scanner */
   cm.setOption("foldOptions", { rangeFinder: CodeMirror.fold.indent });
 
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
   const progText = document.getElementById('progText');
   const loadingBox = document.getElementById('loading');
-  const coiNote = document.getElementById('coiNote');
 
   const fileNameEl = document.getElementById('fileName');
   const saveBtn = document.getElementById('saveBtn');
@@ -210,14 +201,12 @@ END start
   const loader = document.getElementById('loader');
 
   const elDos = document.getElementById('dosbox');
-  const emuSection = document.getElementById('emuSection');
   const elInput = document.getElementById('fileInput');
   const elList = document.getElementById('fileList');
   const startBtn = document.getElementById('startBtn');
   const stopBtn = document.getElementById('stopBtn');
 
   const encoder = new TextEncoder();
-  const CACHE_NAME = 'dosbox-prewarm-v10';
   let toolBufs = new Map();
   let player = null;
   const bag = new Map();
@@ -229,12 +218,13 @@ END start
 
   const nameRow = document.getElementById('nameRow');
   const topControls = document.getElementById('topControls');
+
   function resizeEditor() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    const SAFE = 140;
+    const SAFE = workspace.classList.contains('no-safe') ? 0 : 140;
     const loadingH = (loadingBox && loadingBox.offsetParent !== null) ? loadingBox.offsetHeight : 0;
-    const nameH = nameRow ? nameRow.offsetHeight : 0;
-    const ctrlH = topControls ? topControls.offsetHeight : 0;
+    const nameH = nameRow.offsetHeight;
+    const ctrlH = topControls.offsetHeight;
     const target = Math.max(200, vh - loadingH - nameH - ctrlH - SAFE);
     cm.setSize(null, target);
     cm.refresh();
@@ -244,8 +234,7 @@ END start
   setTimeout(resizeEditor, 0);
 
   function autoDetectTasm(filename) {
-    if (filename && filename.toLowerCase().endsWith(".asm")) cm.setOption("mode","tasm");
-    else cm.setOption("mode", null);
+    cm.setOption("mode", filename.toLowerCase().endsWith(".asm") ? "tasm" : null);
   }
   fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
   autoDetectTasm(fileNameEl.value);
@@ -257,15 +246,11 @@ END start
     const stopRow = 56, margin = 24;
     const availH = Math.max(240, viewportH - stopRow - margin);
     const hFromW = Math.floor(pageW * (AR_H / AR_W));
-    let targetW, targetH;
-    if (hFromW <= availH) { targetW = pageW; targetH = hFromW; }
-    else { targetH = availH; targetW = Math.floor(availH * (AR_W / AR_H)); }
+    const targetH = (hFromW <= availH) ? hFromW : availH;
+    const targetW = (hFromW <= availH) ? pageW : Math.floor(availH * (AR_W / AR_H));
     elDos.style.width = targetW + 'px';
     elDos.style.height = targetH + 'px';
   }
-  window.addEventListener('resize', sizeDosbox);
-  if (window.visualViewport) window.visualViewport.addEventListener('resize', sizeDosbox);
-  setTimeout(sizeDosbox, 0);
 
   const toDos83 = (name)=>{
     const i = name.lastIndexOf('.');
@@ -330,13 +315,12 @@ BUILD
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
       await new Promise(r=>setTimeout(r,120));
     }
-    coiNote.textContent = 'Note: page is not cross-origin isolated yet. If Start fails, hard-refresh once.';
+    document.getElementById('coiNote').textContent = 'Note: page not isolated yet. If Start fails, hard-refresh.';
   }
 
   function refreshFileList(){
-    const files = Array.from(bag.values());
     elList.innerHTML = '';
-    for (const f of files) {
+    for (const f of Array.from(bag.values())) {
       const li = document.createElement('li');
       li.textContent = `${f.name} → ${toDos83(f.name)}`;
       elList.appendChild(li);
@@ -365,34 +349,24 @@ BUILD
       const hit = await cache.match(f.url);
       if (hit) {
         done++; prog.value = done; progText.textContent = `${done}/${total}`;
-        if (f.keepInMemory) {
-          const buf = new Uint8Array(await hit.clone().arrayBuffer());
-          mem.set(f.path, buf);
-        }
+        if (f.keepInMemory) mem.set(f.path, new Uint8Array(await hit.clone().arrayBuffer()));
       }
     }
     for (const f of files) {
-      const hit = await cache.match(f.url);
-      if (hit) continue;
+      if (await cache.match(f.url)) continue;
       const resp = await fetch(new Request(f.url, { cache:'reload' })).catch(()=>null);
       if (!resp || !resp.ok) {
-        if (f.required) throw new Error('Network error loading ' + f.url);
+        if (f.required) throw new Error('Network error ' + f.url);
       } else {
         cache.put(f.url, resp.clone()).catch(()=>{});
-        if (f.keepInMemory) {
-          const buf = new Uint8Array(await resp.clone().arrayBuffer());
-          mem.set(f.path, buf);
-        }
+        if (f.keepInMemory) mem.set(f.path, new Uint8Array(await resp.clone().arrayBuffer()));
       }
       done++; prog.value = done; progText.textContent = `${done}/${total}`;
     }
     for (const f of files) {
       if (!f.keepInMemory || mem.has(f.path)) continue;
       const hit = await cache.match(f.url);
-      if (hit) {
-        const buf = new Uint8Array(await hit.clone().arrayBuffer());
-        mem.set(f.path, buf);
-      }
+      if (hit) mem.set(f.path, new Uint8Array(await hit.clone().arrayBuffer()));
     }
     toolBufs = new Map();
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
@@ -401,7 +375,6 @@ BUILD
     startBtn.disabled = false;
 
     resizeEditor();
-    sizeDosbox();
   }
 
   saveBtn.addEventListener('click', ()=>{
@@ -418,8 +391,7 @@ BUILD
   loader.addEventListener('change', async ()=>{
     const f = loader.files && loader.files[0];
     if (!f) return;
-    const txt = await f.text();
-    cm.setValue(txt);
+    cm.setValue(await f.text());
     fileNameEl.value = toDos83(f.name);
     loader.value = '';
     cm.refresh();
@@ -444,8 +416,13 @@ BUILD
       startBtn.disabled = true;
       startBtn.classList.add('disabled');
 
+      /* show emulator and restore safe padding */
+      emuSection.style.display = 'block';
+      workspace.classList.remove('no-safe');
+      resizeEditor();
+
       const dosAsmName = toDos83(nameRaw);
-      const asmBytes = new TextEncoder().encode(cm.getValue());
+      const asmBytes = encoder.encode(cm.getValue());
 
       const initFs = [
         { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
@@ -457,8 +434,7 @@ BUILD
         const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
       }
       for (const f of Array.from(bag.values())) {
-        const buf = new Uint8Array(await f.arrayBuffer());
-        initFs.push({ path: toDos83(f.name), contents: buf });
+        initFs.push({ path: toDos83(f.name), contents: new Uint8Array(await f.arrayBuffer()) });
       }
 
       startDosWith(initFs);
@@ -466,10 +442,10 @@ BUILD
       setTimeout(()=> {
         emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         sizeDosbox();
-      }, 50);
+      }, 80);
     } catch (e) {
       console.error(e);
-      alert('Could not start emulator. See console.');
+      alert('Start failed. See console.');
     }
   });
 
@@ -481,7 +457,7 @@ BUILD
   (async ()=>{
     await waitForCOIController().catch(()=>{});
     try { await preloadAll(); }
-    catch (e) { status.textContent = 'Preload failed. Try hard-refresh.'; console.error(e); }
+    catch (e) { status.textContent = 'Preload failed. Hard-refresh.'; console.error(e); }
   })();
 })();
 </script>
