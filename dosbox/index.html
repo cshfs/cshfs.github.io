@@ -77,42 +77,17 @@
 
   /* Medium contrast styling for TASM mode */
 
-.cm-s-default .cm-tasm-label {
-  color: #6a1b9a;        /* Purple labels */
-  font-weight: 600;
-}
+/* Notepad++-like colors */
+.cm-builtin       { color:#0070C0; }   /* opcodes like mov */
+.cm-variable-2    { color:#0070C0; }   /* registers ax, ds */
+.cm-tasm-directive{ color:#7A3E9D; }   /* IDEAL, MODEL, DATASEG, CODESEG, END */
+.cm-tasm-label    { color:#7A3E9D; font-weight:600; } /* start: exit: */
+.cm-keyword       { color:#0000FF; }   /* DB, DW, PROC, PTR, ASSUME */
+.cm-atom          { color:#008080; font-style:italic; } /* MODEL small/tiny, @data */
+.cm-number        { color:#C05000; }
+.cm-comment       { color:#008000; }   /* green like N++ */
+.cm-string        { color:#A31515; }
 
-.cm-s-default .cm-tasm-directive {
-  color: #1565c0;        /* Medium blue */
-  font-weight: 600;
-}
-
-.cm-s-default .cm-builtin {
-  color: #0277bd;        /* Instruction: cyan/blue */
-}
-
-.cm-s-default .cm-keyword {
-  color: #2e7d32;        /* Keywords: green */
-  font-weight: 500;
-}
-
-.cm-s-default .cm-number {
-  color: #ad1457;        /* Numbers: rose */
-}
-
-.cm-s-default .cm-variable-2 {
-  color: #00838f;        /* Registers: teal */
-  font-weight: 500;
-}
-
-.cm-s-default .cm-string {
-  color: #c62828;        /* Strings: red */
-}
-
-.cm-s-default .cm-comment {
-  color: #777;
-  font-style: italic;
-}
 </style>
 
 <script>
