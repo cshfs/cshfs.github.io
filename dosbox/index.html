@@ -25,7 +25,7 @@
 
 <style>
   :root{
-    --ctl-h: 36px; /* unified control height for input + buttons */
+    --ctl-h: 32px; /* unified exact height for input + buttons (Option B) */
   }
 
   /* Force white everywhere */
@@ -54,29 +54,31 @@
   }
   #workspace.no-safe { padding-bottom: 0; }
 
-  /* Controls — white buttons, black border/text, same height as input */
+  /* Controls — white buttons, black border/text, same height as input, flat borders */
   .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .btn{
     font: inherit;
-    font-size: 13px;
+    font-size: 12px;
     height: var(--ctl-h);
-    line-height: calc(var(--ctl-h) - 4px);
-    padding: 0 12px;
+    line-height: calc(var(--ctl-h) - 4px); /* minus 2px top + 2px bottom border */
+    padding: 0 10px;
     background:#fff; color:#000; border:2px solid #000; cursor:pointer;
     box-sizing: border-box;
+    border-radius: 0; /* flat edge */
   }
-  .btn:hover { background:#f5f5f5; }
+  .btn:hover { background:#f4f4f4; }
   .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
 
   #fileName{
     font: inherit;
     font-size: 18px;
     height: var(--ctl-h);
-    padding: 0 12px;
+    padding: 0 10px;
     border:2px solid #000;
     width: 260px;
     background:#fff; color:#000;
     box-sizing: border-box;
+    border-radius: 0; /* flat edge */
   }
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
@@ -90,12 +92,9 @@
   .CodeMirror-foldgutter { width: 16px; cursor: pointer; }
   .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters { background:#fff !important; color:#000; }
 
-  /* Make fold markers visible even without the stock CSS sprites */
-  .CodeMirror-foldmarker {
-    color:#000; font-weight:700; text-shadow:none; cursor:pointer;
-  }
+  /* Fold markers */
+  .CodeMirror-foldmarker { color:#000; font-weight:700; text-shadow:none; cursor:pointer; }
   .CodeMirror-foldgutter-open:after  { content:"▾"; color:#000; }
-  .CodeMirror-foldgutter-folded:after,
   .CodeMirror-foldgutter-closed:after{ content:"▸"; color:#000; }
 
   /* Emulator hidden until Start */
@@ -214,10 +213,6 @@ END start
 
 <script>
 (function(){
-  const LS_KEY_NAME = 'dos_editor_name_v1';
-  const LS_KEY_TEXT = 'dos_editor_text_v1';
-  const LS_FOLDS_PREFIX = 'dos_editor_folds_'; // per filename
-
   const htmlEl = document.documentElement;
   const bodyEl = document.body;
   const workspace = document.getElementById('workspace');
@@ -233,7 +228,7 @@ END start
     gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
 
-  /* ==== Robust folding: TASM labels/PROC/segments + regions + indent + braces ==== */
+  /* Folding: TASM labels/PROC/segments + regions + indent + braces */
   (function() {
     function isTopLevel(s){ return s && !/^\s/.test(s) && s.trim() !== ''; }
     function isLabel(s){ return /:\s*(;.*)?$/.test(s) && isTopLevel(s); }
@@ -247,22 +242,17 @@ END start
       if (toLine <= fromLine) return null;
       const a = cmInst.getLine(fromLine) || "";
       const b = cmInst.getLine(toLine) || "";
-      return {
-        from: CodeMirror.Pos(fromLine, a.length),
-        to:   CodeMirror.Pos(toLine,   b.length)
-      };
+      return { from: CodeMirror.Pos(fromLine, a.length), to: CodeMirror.Pos(toLine, b.length) };
     }
 
     function tasmFold(cmInst, start) {
       const first = cmInst.getLine(start.line) || "";
 
-      // Region folding ;#region ... ;#endregion
+      // ;#region ... ;#endregion
       if (isRegionStart(first)) {
         const last = cmInst.lineCount();
         for (let i = start.line + 1; i < last; i++) {
-          if (isRegionEnd(cmInst.getLine(i)||"")) {
-            return rangeFromTo(cmInst, start.line, i);
-          }
+          if (isRegionEnd(cmInst.getLine(i)||"")) return rangeFromTo(cmInst, start.line, i);
         }
         return null;
       }
@@ -280,84 +270,28 @@ END start
       }
       return rangeFromTo(cmInst, start.line, i - 1);
     }
-
     CodeMirror.registerHelper("fold", "tasm", tasmFold);
   })();
 
-  // master rangeFinder: try TASM, then indent, then braces
   function masterRange(cmInst, start) {
-    return (CodeMirror.fold.tasm && CodeMirror.fold.tasm(cmInst, start)) ||
+    return (CodeMirror.fold.tasm   && CodeMirror.fold.tasm(cmInst, start)) ||
            (CodeMirror.fold.indent && CodeMirror.fold.indent(cmInst, start)) ||
            (CodeMirror.fold.brace  && CodeMirror.fold.brace(cmInst, start)) ||
            null;
   }
   cm.setOption("foldOptions", { rangeFinder: masterRange });
 
-  // Ensure fold markers render even if CSS misses
-  CodeMirror.defineOption("foldMarker", "\u2026"); // not required, but harmless
-
-  const status = document.getElementById('status');
-  const prog = document.getElementById('prog');
-  const progText = document.getElementById('progText');
-  const loadingBox = document.getElementById('loading');
-
-  const fileNameEl = document.getElementById('fileName');
-  const saveBtn = document.getElementById('saveBtn');
-  const loadBtn = document.getElementById('loadBtn');
-  const loader = document.getElementById('loader');
-
-  const elDos = document.getElementById('dosbox');
-  const elInput = document.getElementById('fileInput');
-  const startBtn = document.getElementById('startBtn');
-  const stopBtn = document.getElementById('stopBtn');
-
-  const encoder = new TextEncoder();
-  let toolBufs = new Map();
-  let player = null;
-  const bag = new Map();
-
-  const savedName = localStorage.getItem(LS_KEY_NAME);
-  const savedText = localStorage.getItem(LS_KEY_TEXT);
-  if (savedName) fileNameEl.value = savedName;
-  if (savedText) cm.setValue(savedText);
-
-  const nameRow = document.getElementById('nameRow');
-
-  /* ===== Fold persistence (per filename) ===== */
-  function foldsKey() {
-    const name = (fileNameEl.value || 'base.asm').toLowerCase();
-    return LS_FOLDS_PREFIX + name;
-  }
-  function saveFolds() {
-    const marks = cm.getAllMarks();
-    const folds = [];
-    for (const m of marks) {
-      if (m.collapsed) {
-        const r = m.find();
-        if (r) folds.push([r.from.line, r.to.line]);
-      }
-    }
-    try { localStorage.setItem(foldsKey(), JSON.stringify(folds)); } catch {}
-  }
-  function restoreFolds() {
-    try {
-      const data = localStorage.getItem(foldsKey());
-      if (!data) return;
-      const folds = JSON.parse(data);
-      folds.forEach(([from]) => {
-        cm.foldCode(CodeMirror.Pos(from, 0), { rangeFinder: masterRange });
-      });
-    } catch {}
-  }
+  // Click-to-fold
   cm.on('gutterClick', (cmI, line, gutter) => {
     if (gutter === 'CodeMirror-foldgutter') {
       cmI.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: masterRange });
-      setTimeout(saveFolds, 0);
     }
   });
-  window.addEventListener('beforeunload', saveFolds);
 
-  /* ===== Sizing ===== */
+  /* Sizing */
+  const nameRow = document.getElementById('nameRow');
+  const loadingBox = document.getElementById('loading');
+
   function resizeEditor() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
     const mainPad = getComputedStyle(mainEl);
@@ -373,16 +307,19 @@ END start
   }
   window.addEventListener('resize', resizeEditor);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeEditor);
-  setTimeout(() => { resizeEditor(); restoreFolds(); }, 0);
+  setTimeout(resizeEditor, 0);
 
   function autoDetectTasm(filename) {
     cm.setOption("mode", filename.toLowerCase().endsWith(".asm") ? "tasm" : null);
   }
-  fileNameEl.addEventListener("input", () => { autoDetectTasm(fileNameEl.value); restoreFolds(); });
+
+  const fileNameEl = document.getElementById('fileName');
+  fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
   autoDetectTasm(fileNameEl.value);
 
-  /* ===== DOSBox sizing ===== */
+  /* DOSBox sizing */
   const AR_W = 1050, AR_H = 600;
+  const elDos = document.getElementById('dosbox');
   function sizeDosbox() {
     const pageW = mainEl.clientWidth;
     const viewportH = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
@@ -395,15 +332,16 @@ END start
     elDos.style.height = targetH + 'px';
   }
 
-  /* ===== Helpers ===== */
-  const toDos83 = (name)=>{
+  /* Helpers */
+  const encoder = new TextEncoder();
+  function toDos83(name){
     const i = name.lastIndexOf('.');
     let b = (i>=0?name.slice(0,i):name).toUpperCase();
     let e = (i>=0?name.slice(i+1):'').toUpperCase();
     const clean = s=>s.replace(/[^A-Z0-9]/g,'_');
     b = clean(b).slice(0,8); e = clean(e).slice(0,3);
     return e?`${b}.${e}`:b;
-  };
+  }
 
   const DOS_CONF = `
 [sdl]
@@ -438,6 +376,10 @@ BUILD
     return encoder.encode(lines.join("\r\n") + "\r\n");
   }
 
+  let toolBufs = new Map();
+  let player = null;
+  const bag = new Map();
+
   function startDosWith(initFs){
     if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
     elDos.innerHTML = '';
@@ -453,7 +395,7 @@ BUILD
     requestAnimationFrame(() => setTimeout(sizeDosbox, 60));
   }
 
-  /* ===== Reveal + scroll after Start ===== */
+  /* Reveal + scroll after Start */
   function revealAndScroll() {
     htmlEl.classList.remove('no-scroll');
     bodyEl.classList.remove('no-scroll');
@@ -482,17 +424,11 @@ BUILD
     })();
   }
 
-  /* ===== COI wait ===== */
-  async function waitForCOIController(timeoutMs=8000){
-    const t0 = performance.now();
-    while (performance.now() - t0 < timeoutMs) {
-      if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
-      await new Promise(r=>setTimeout(r,120));
-    }
-    document.getElementById('coiNote').textContent = 'Note: page not isolated yet. If Start fails, hard-refresh.';
-  }
+  /* Preload */
+  const status = document.getElementById('status');
+  const prog = document.getElementById('prog');
+  const progText = document.getElementById('progText');
 
-  /* ===== Preload ===== */
   async function preloadAll(){
     status.textContent = 'Caching emulator and tools…';
     const files = [
@@ -538,14 +474,21 @@ BUILD
     for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
     document.getElementById('loading').style.display = 'none';
-    startBtn.disabled = false;
+    document.getElementById('startBtn').disabled = false;
 
     resizeEditor();
   }
 
-  /* ===== Actions ===== */
+  /* UI actions */
+  const saveBtn = document.getElementById('saveBtn');
+  const loadBtn = document.getElementById('loadBtn');
+  const loader  = document.getElementById('loader');
+  const elInput = document.getElementById('fileInput');
+  const startBtn= document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+
   saveBtn.addEventListener('click', ()=>{
-    const name = (fileNameEl.value || 'BASE.ASM');
+    const name = (document.getElementById('fileName').value || 'BASE.ASM');
     const blob = new Blob([cm.getValue()], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -559,23 +502,18 @@ BUILD
     const f = loader.files && loader.files[0];
     if (!f) return;
     cm.setValue(await f.text());
-    fileNameEl.value = f.name;
+    document.getElementById('fileName').value = f.name;
     loader.value = '';
     cm.refresh();
     resizeEditor();
-    restoreFolds();
     cm.focus();
   });
 
-  // Add assets to bag (no listing UI)
   elInput.addEventListener('change', ()=>{ for (const f of Array.from(elInput.files || [])) bag.set(f.name, f); elInput.value=''; });
 
   startBtn.addEventListener('click', async ()=>{
     try {
-      const nameRaw = (fileNameEl.value || 'base.asm').trim();
-      localStorage.setItem(LS_KEY_NAME, nameRaw);
-      localStorage.setItem(LS_KEY_TEXT, cm.getValue());
-      saveFolds();
+      const nameRaw = (document.getElementById('fileName').value || 'base.asm').trim();
 
       cm.setOption('readOnly', true);
       workspace.classList.add('cm-locked');
@@ -620,7 +558,16 @@ BUILD
   bodyEl.classList.add('no-scroll');
 
   (async ()=>{
-    await waitForCOIController().catch(()=>{});
+    // COI wait
+    const t0 = performance.now();
+    while (performance.now() - t0 < 8000) {
+      if (navigator.serviceWorker?.controller && self.crossOriginIsolated) break;
+      await new Promise(r=>setTimeout(r,120));
+    }
+    if (!(navigator.serviceWorker?.controller && self.crossOriginIsolated)) {
+      const note = document.getElementById('coiNote');
+      if (note) note.textContent = 'Note: page not isolated yet. If Start fails, hard-refresh.';
+    }
     try { await preloadAll(); }
     catch (e) { status.textContent = 'Preload failed. Hard-refresh.'; console.error(e); }
   })();
