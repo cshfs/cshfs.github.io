@@ -13,7 +13,7 @@
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
-<!-- Folding addons (local, files in /dosbox) -->
+<!-- Folding addons (local, in /dosbox) -->
 <link rel="stylesheet" href="foldgutter.min.css">
 <script src="foldcode.min.js"></script>
 <script src="foldgutter.min.js"></script>
@@ -23,9 +23,9 @@
 <script src="tasm.js"></script>
 
 <style>
-  :root {
-    /* unified control height for buttons and filename input */
-    --ctl-h: 34px;
+  :root{
+    --ctl-h-input: 36px; /* filename input */
+    --ctl-h-btn:   30px; /* buttons (shorter than input) */
   }
 
   /* Force white everywhere */
@@ -54,24 +54,23 @@
   }
   #workspace.no-safe { padding-bottom: 0; }
 
-  /* Controls — compact and unified height */
+  /* Controls — compact and unified heights */
   .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-  .btn {
+  .btn{
     font: inherit;
     font-size: 14px;
-    height: var(--ctl-h);
-    line-height: calc(var(--ctl-h) - 4px); /* approx minus borders */
+    height: var(--ctl-h-btn);
+    line-height: calc(var(--ctl-h-btn) - 4px);
     padding: 0 10px;
     background:#111; color:#fff; border:2px solid #111; cursor:pointer;
   }
   .btn:hover { background:#000; border-color:#000; }
   .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
 
-  /* Filename input: 18px font but same total height as buttons */
-  #fileName {
+  #fileName{
     font: inherit;
     font-size: 18px;
-    height: var(--ctl-h);
+    height: var(--ctl-h-input);
     padding: 0 10px;
     border:2px solid #111;
     width: 260px;
@@ -226,33 +225,40 @@ END start
     gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
 
-  /* Custom fold helper for TASM labels/PROC; then fallback to indent. */
+  /* Robust TASM fold helper (labels, PROC/ENDP, SEG headers). */
   (function() {
+    function isNonEmptyLeftEdge(lineText){
+      if (/^\s/.test(lineText)) return false;
+      if (lineText.trim() === "") return false;
+      return true;
+    }
     function tasmFold(cmInst, start) {
-      const lineText = cmInst.getLine(start.line) || "";
-      const isLabel = /:\s*(;.*)?$/.test(lineText) && !/^\s/.test(lineText);
-      const isProc  = /\bproc\b/i.test(lineText);
-      if (!isLabel && !isProc) return;
+      const first = cmInst.getLine(start.line) || "";
+      const isLabel = /:\s*(;.*)?$/.test(first) && !/^\s/.test(first);
+      const isProc  = /\bproc\b/i.test(first);
+      const isSeg   = /^(IDEAL|MODEL|CODESEG|DATASEG|STACK)\b/i.test(first) && !/^\s/.test(first);
+      if (!isLabel && !isProc && !isSeg) return;
 
       const last = cmInst.lineCount();
       let i = start.line + 1;
       while (i < last) {
         const t = cmInst.getLine(i) || "";
-        const atLeftEdge = !/^\s/.test(t);
-        const isEndp = /^\s*endp\b/i.test(t);
-        if ((isLabel && atLeftEdge) || (isProc && isEndp)) break;
+        if (isLabel || isSeg) {
+          if (isNonEmptyLeftEdge(t)) break;      // next top-level thing
+        }
+        if (isProc && /^\s*endp\b/i.test(t)) { i++; break; } // include ENDP line
         i++;
       }
       if (i <= start.line + 1) return;
       return {
-        from: CodeMirror.Pos(start.line, lineText.length),
+        from: CodeMirror.Pos(start.line, first.length),
         to: CodeMirror.Pos(i - 1, (cmInst.getLine(i - 1) || "").length)
       };
     }
     CodeMirror.registerHelper("fold", "tasm", tasmFold);
   })();
 
-  /* Use a simple OR instead of combine to avoid missing helper edge-cases */
+  /* Range finder: try TASM, else indent. */
   function tasmOrIndent(cmInst, start) {
     return (CodeMirror.fold.tasm && CodeMirror.fold.tasm(cmInst, start)) ||
            (CodeMirror.fold.indent && CodeMirror.fold.indent(cmInst, start)) ||
@@ -412,38 +418,39 @@ BUILD
       kiosk: true,
       autostart: true
     });
-    // allow layout to settle then size
-    requestAnimationFrame(() => setTimeout(sizeDosbox, 50));
+    // size after canvas attaches
+    requestAnimationFrame(() => setTimeout(sizeDosbox, 60));
   }
 
   /* Reliable reveal + scroll after Start */
   function revealAndScroll() {
-    // reveal emulator and restore page scrolling
     htmlEl.classList.remove('no-scroll');
     bodyEl.classList.remove('no-scroll');
     emuSection.style.display = 'block';
     workspace.classList.remove('no-safe');
 
-    // let layout settle, then scroll hard to bottom
     requestAnimationFrame(() => {
       resizeEditor();
       sizeDosbox();
-      requestAnimationFrame(() => {
-        const bottom = Math.max(
-          document.body.scrollHeight,
-          document.documentElement.scrollHeight
-        );
-        window.scrollTo({ top: bottom, behavior: 'smooth' });
-        // final nudge after canvas attaches
-        setTimeout(() => {
-          const bottom2 = Math.max(
-            document.body.scrollHeight,
-            document.documentElement.scrollHeight
-          );
-          window.scrollTo({ top: bottom2, behavior: 'smooth' });
-        }, 250);
-      });
+      // try both methods
+      emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior: 'smooth' }), 160);
     });
+  }
+
+  /* Poll for canvas to ensure final scroll lands */
+  function waitForCanvasAndNudge() {
+    const t0 = performance.now();
+    (function tick(){
+      const c = document.querySelector('#dosbox canvas');
+      if (c) {
+        setTimeout(() =>
+          window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior: 'smooth' })
+        , 120);
+      } else if (performance.now() - t0 < 5000) {
+        requestAnimationFrame(tick);
+      }
+    })();
   }
 
   async function waitForCOIController(timeoutMs=8000){
@@ -543,7 +550,7 @@ BUILD
       startBtn.disabled = true;
       startBtn.classList.add('disabled');
 
-      // Reveal emulator and scroll
+      // Reveal and scroll
       revealAndScroll();
 
       const dosAsmName = toDos83(nameRaw);
@@ -563,6 +570,7 @@ BUILD
       }
 
       startDosWith(initFs);
+      waitForCanvasAndNudge();
 
     } catch (e) {
       console.error(e);
