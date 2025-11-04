@@ -9,64 +9,69 @@
 <link rel="stylesheet" href="js-dos.css" />
 <script src="js-dos.js"></script>
 
-<!-- CodeMirror (local) -->
+<!-- CodeMirror 5 (local) -->
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
-<!-- Folding addon: **indent only** -->
+<!-- Folding core + gutter (local) -->
 <link rel="stylesheet" href="foldgutter.min.css">
 <script src="foldcode.min.js"></script>
 <script src="foldgutter.min.js"></script>
-<script src="indent-fold.min.js"></script>
 
 <!-- TASM mode -->
 <script src="tasm.js"></script>
 
 <style>
   :root{
-    --ctl-h: 28px; /* shared outer height for input and buttons */
+    /* exact outer heights match for input + buttons */
+    --ctl-h: 26px;
+    --ctl-b: 2px;   /* border width */
+    --ctl-py: 0px;  /* vertical padding inside content box */
   }
 
-  /* Force white */
-  :root, html, body { height: 100%; background:#fff !important; color:#000; }
+  /* Force white everywhere */
+  html, body { height: 100%; background:#fff !important; color:#000; }
   body { margin: 0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
   body, main, section, #dosbox, #dosbox * { background:#fff !important; }
 
   html.no-scroll, body.no-scroll { overflow-y: hidden; }
-
   main { width: min(1280px, 95vw); margin: 0 auto; padding: 10px; }
   section { margin: 10px 0; }
 
   /* Loading */
-  #loading { padding: 4px 0; margin: 0; }
+  #loading { padding: 4px 0; }
   #status { font-size: 13px; margin: 4px 0; }
   progress { width: 220px; height: 10px; vertical-align: middle; }
 
   /* Workspace */
-  #workspace { display:flex; flex-direction:column; gap:8px; padding-bottom:120px; margin-bottom: env(safe-area-inset-bottom, 0px); }
+  #workspace { display:flex; flex-direction:column; gap:8px; padding-bottom:120px; }
   #workspace.no-safe { padding-bottom: 0; }
 
-  /* Controls — white, black border, flat, EXACT same height */
+  /* Controls — flat, same outer height, box-sizing border-box */
   .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+
   .btn{
-    display:inline-flex; align-items:center; justify-content:center;
+    box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
     font: inherit; font-size: 12px;
-    height: var(--ctl-h); padding: 0 10px;
-    border: 2px solid #000; border-radius: 0;
-    background:#fff; color:#000; cursor:pointer; box-sizing:border-box;
+    height: var(--ctl-h);
+    padding: var(--ctl-py) 10px;
+    border: var(--ctl-b) solid #000;
+    border-radius: 0;
+    background:#fff; color:#000; cursor:pointer;
   }
   .btn:hover { background:#f4f4f4; }
-  .btn[disabled], .btn.disabled { opacity:.55; cursor:not-allowed; }
+  .btn[disabled] { opacity:.55; cursor:not-allowed; }
 
   #fileName{
+    box-sizing: border-box;
+    -webkit-appearance: none; appearance: none;
     font: inherit; font-size: 18px;
-    height: var(--ctl-h); padding: 0 10px;
-    line-height: calc(var(--ctl-h) - 4px); /* vertically center like buttons */
-    border:2px solid #000; border-radius:0; box-sizing:border-box;
+    height: var(--ctl-h);
+    padding: var(--ctl-py) 10px;
+    border: var(--ctl-b) solid #000; border-radius:0;
     width: 260px; background:#fff; color:#000;
-    outline: none;
   }
-  #fileName:focus { outline: 2px solid #0003; }
 
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
@@ -194,7 +199,7 @@ END start
 
 <script>
 (function(){
-  /* ===== Persistence keys ===== */
+  /* ===== Persistence (filename + text) ===== */
   const LS_KEY_NAME = 'dos_editor_name_v1';
   const LS_KEY_TEXT = 'dos_editor_text_v1';
 
@@ -204,25 +209,62 @@ END start
   const emuSection = document.getElementById('emuSection');
   const mainEl = document.querySelector('main');
 
-  /* ===== Editor ===== */
+  /* ===== CodeMirror ===== */
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true,
     mode: 'tasm',
     indentUnit: 2,
     tabSize: 2,
     foldGutter: true,
-    gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"],
-    foldOptions: { rangeFinder: CodeMirror.fold.indent } // indent-fold only
+    gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
 
-  // Gutter click folds using indent-fold
-  cm.on('gutterClick', (inst, line, gutter) => {
-    if (gutter === 'CodeMirror-foldgutter') {
-      inst.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: CodeMirror.fold.indent });
+  /* --- Robust TASM folding: folds a label/PROC/SEGMENT until the next block start.
+         Comments and blank lines do NOT terminate the fold. --- */
+  (function() {
+    function isBlockStart(s){
+      if (!s) return false;
+      if (/^\s*;/.test(s)) return false;           // comment is not a block start
+      if (/^[A-Za-z_.$][\w.$]*\s*:/ .test(s)) return true;         // label:
+      if (/\bproc\b/i.test(s)) return true;                          // PROC
+      if (/^\s*endp\b/i.test(s)) return true;                        // ENDP
+      if (/^\s*(IDEAL|MODEL|CODESEG|DATASEG|STACK|ENDS?)\b/i.test(s)) return true; // segments
+      if (/^\s*END\b/i.test(s)) return true;                         // END start
+      return false;
+    }
+    function tasmFold(cmInst, start) {
+      const head = cmInst.getLine(start.line) || "";
+      if (!isBlockStart(head)) return null;
+
+      const last = cmInst.lineCount();
+      let i = start.line + 1;
+      while (i < last) {
+        const t = cmInst.getLine(i) || "";
+        if (/^\s*endp\b/i.test(t) && /\bproc\b/i.test(head)) { i++; break; } // include ENDP for PROC
+        if (isBlockStart(t)) break;  // next block starts
+        i++;
+      }
+      if (i <= start.line + 1) return null;
+
+      return {
+        from: CodeMirror.Pos(start.line, head.length),
+        to:   CodeMirror.Pos(i - 1, (cmInst.getLine(i - 1) || "").length)
+      };
+    }
+    CodeMirror.registerHelper("fold", "tasm", tasmFold);
+  })();
+
+  // Use our TASM range finder
+  cm.setOption("foldOptions", { rangeFinder: CodeMirror.fold.tasm });
+
+  // Enable gutter clicking
+  cm.on('gutterClick', (inst, line, g) => {
+    if (g === 'CodeMirror-foldgutter') {
+      inst.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: CodeMirror.fold.tasm });
     }
   });
 
-  /* ===== Save/restore file name + content ===== */
+  /* ===== Persist filename + content ===== */
   const fileNameEl = document.getElementById('fileName');
   const savedName = localStorage.getItem(LS_KEY_NAME);
   const savedText = localStorage.getItem(LS_KEY_TEXT);
@@ -234,7 +276,7 @@ END start
     localStorage.setItem(LS_KEY_TEXT, cm.getValue());
   }
   fileNameEl.addEventListener('input', persistNow);
-  cm.on('change', () => { clearTimeout(persistNow._t); persistNow._t = setTimeout(persistNow, 150); });
+  cm.on('change', () => { clearTimeout(persistNow._t); persistNow._t = setTimeout(persistNow, 120); });
 
   function autoDetectTasm(filename) {
     cm.setOption("mode", filename.toLowerCase().endsWith(".asm") ? "tasm" : null);
@@ -341,13 +383,11 @@ BUILD
     requestAnimationFrame(() => setTimeout(sizeDosbox, 60));
   }
 
-  /* Reveal + scroll */
   function revealAndScroll() {
     htmlEl.classList.remove('no-scroll');
     bodyEl.classList.remove('no-scroll');
     emuSection.style.display = 'block';
     workspace.classList.remove('no-safe');
-
     requestAnimationFrame(() => {
       resizeEditor();
       sizeDosbox();
@@ -466,7 +506,6 @@ BUILD
       cm.setOption('readOnly', true);
       workspace.classList.add('cm-locked');
       startBtn.disabled = true;
-      startBtn.classList.add('disabled');
 
       revealAndScroll();
 
@@ -505,15 +544,11 @@ BUILD
   bodyEl.classList.add('no-scroll');
 
   (async ()=>{
-    // wait a bit for COI; proceed even if not ready
+    // proceed even if COI is not ready
     const t0 = performance.now();
     while (performance.now() - t0 < 8000) {
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) break;
       await new Promise(r=>setTimeout(r,120));
-    }
-    if (!(navigator.serviceWorker?.controller && self.crossOriginIsolated)) {
-      const note = document.getElementById('coiNote');
-      if (note) note.textContent = 'Note: page not isolated yet. If Start fails, hard-refresh.';
     }
     try { await preloadAll(); }
     catch (e) { status.textContent = 'Preload failed. Hard-refresh.'; console.error(e); }
