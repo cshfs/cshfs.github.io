@@ -23,6 +23,7 @@
 <script src="tasm.js"></script>
 
 <style>
+  /* Force white everywhere */
   :root, html, body { height: 100%; background:#fff !important; color:#000; }
   body { margin: 0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
   body, main, section, #dosbox, #dosbox * { background:#fff !important; }
@@ -33,19 +34,22 @@
   main { width: min(1280px, 95vw); margin: 0 auto; padding: 10px; }
   section { margin: 10px 0; }
 
+  /* Loading strip (tight) */
   #loading { padding: 4px 0; margin: 0; }
   #status { font-size: 13px; margin: 4px 0; }
   progress { width: 220px; height: 10px; vertical-align: middle; }
 
+  /* Workspace: padding-bottom only when emulator visible */
   #workspace {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding-bottom: 120px; /* safety only when emulator is visible */
+    padding-bottom: 120px; /* safety only when emulator visible */
     margin-bottom: env(safe-area-inset-bottom, 0px);
   }
   #workspace.no-safe { padding-bottom: 0; }
 
+  /* Controls — compact */
   .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .btn { font: inherit; padding: 6px 10px; font-size: 14px; background:#111; color:#fff; border:2px solid #111; cursor:pointer; }
   .btn:hover { background:#000; border-color:#000; }
@@ -54,6 +58,7 @@
   label.file { position: relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
+  /* Editor */
   .editor-wrap { min-height: 0; display: flex; }
   .CodeMirror { width: 100%; border:2px solid #111; }
   .CodeMirror-focused { outline: 2px solid #1115; }
@@ -65,6 +70,7 @@
   /* Emulator hidden until Start */
   #emuSection { display:none; }
 
+  /* DOSBox frame */
   #dosbox {
     border:2px solid #111;
     width: 100%;
@@ -74,6 +80,7 @@
   }
   #dosbox canvas { width:100% !important; height:100% !important; display:block; background:#000 !important; }
 
+  /* Force js-dos wrappers to white */
   :where(.dosbox-root, .dosbox-container, .dosbox-viewport, .dosbox-overlay, .dosbox-loader, .dosbox) {
     background:#fff !important; box-shadow:none !important; border-color:#fff !important;
   }
@@ -114,6 +121,7 @@
     <div id="coiNote" style="font-size:12px;color:#333;"></div>
   </section>
 
+  <!-- start hidden-safe -->
   <section id="workspace" class="no-safe">
     <div class="row" id="nameRow">
       <input id="fileName" type="text" value="base.asm" aria-label="File name">
@@ -193,7 +201,36 @@ END start
     foldGutter: true,
     gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
   });
-  cm.setOption("foldOptions", { rangeFinder: CodeMirror.fold.indent });
+
+  /* Custom fold helper for TASM labels/PROC + combine with indent-fold */
+  (function() {
+    function tasmFold(cmInst, start) {
+      const lineText = cmInst.getLine(start.line) || "";
+      const isLabel = /:\s*(;.*)?$/.test(lineText) && !/^\s/.test(lineText);
+      const isProc  = /\bproc\b/i.test(lineText);
+      if (!isLabel && !isProc) return;
+
+      const last = cmInst.lineCount();
+      let i = start.line + 1;
+      while (i < last) {
+        const t = cmInst.getLine(i) || "";
+        const atLeftEdge = !/^\s/.test(t);
+        const isEndp = /^\s*endp\b/i.test(t);
+        if ((isLabel && atLeftEdge) || (isProc && isEndp)) break;
+        i++;
+      }
+      if (i <= start.line + 1) return;
+      return {
+        from: CodeMirror.Pos(start.line, lineText.length),
+        to: CodeMirror.Pos(i - 1, (cmInst.getLine(i - 1) || "").length)
+      };
+    }
+    CodeMirror.registerHelper("fold", "tasm", tasmFold);
+  })();
+
+  cm.setOption("foldOptions", {
+    rangeFinder: CodeMirror.fold.combine(CodeMirror.fold.tasm, CodeMirror.fold.indent)
+  });
 
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
@@ -248,7 +285,7 @@ END start
       });
     } catch {}
   }
-  // fold via gutterClick then save
+  // Save folds on gutter click and on window unload
   cm.on('gutterClick', (cmI, line, gutter) => {
     if (gutter === 'CodeMirror-foldgutter') {
       cmI.foldCode(CodeMirror.Pos(line, 0));
@@ -351,6 +388,20 @@ BUILD
     setTimeout(sizeDosbox, 50);
   }
 
+  /* Reliable scroll to DOSBox after start */
+  function waitForCanvasAndScroll() {
+    const t0 = performance.now();
+    (function tick(){
+      const c = document.querySelector('#dosbox canvas');
+      if (c) {
+        emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setTimeout(()=>window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }), 30);
+      } else if (performance.now() - t0 < 5000) {
+        requestAnimationFrame(tick);
+      }
+    })();
+  }
+
   async function waitForCOIController(timeoutMs=8000){
     const t0 = performance.now();
     while (performance.now() - t0 < timeoutMs) {
@@ -415,7 +466,7 @@ BUILD
     const blob = new Blob([cm.getValue()], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = name.toUpperCase(); // user-facing; TASM will DOS-ify later
+    a.download = name.toUpperCase();
     a.click();
     URL.revokeObjectURL(a.href);
   });
@@ -433,6 +484,7 @@ BUILD
     cm.focus();
   });
 
+  // Add assets to bag (no listing UI)
   elInput.addEventListener('change', ()=>{ for (const f of Array.from(elInput.files || [])) bag.set(f.name, f); elInput.value=''; });
 
   startBtn.addEventListener('click', async ()=>{
@@ -447,21 +499,21 @@ BUILD
       startBtn.disabled = true;
       startBtn.classList.add('disabled');
 
+      // allow scroll and reveal emulator
       htmlEl.classList.remove('no-scroll');
       bodyEl.classList.remove('no-scroll');
       emuSection.style.display = 'block';
       workspace.classList.remove('no-safe');
       resizeEditor();
 
-      const toDos83 = (name)=>{
+      const dosAsmName = (function toDos83(name){
         const i = name.lastIndexOf('.');
         let b = (i>=0?name.slice(0,i):name).toUpperCase();
         let e = (i>=0?name.slice(i+1):'').toUpperCase();
         const clean = s=>s.replace(/[^A-Z0-9]/g,'_');
         b = clean(b).slice(0,8); e = clean(e).slice(0,3);
         return e?`${b}.${e}`:b;
-      };
-      const dosAsmName = toDos83(nameRaw);
+      })(nameRaw);
       const asmBytes = encoder.encode(cm.getValue());
 
       const initFs = [
@@ -503,19 +555,6 @@ BUILD
           })(f.name), contents: new Uint8Array(await f.arrayBuffer()) });
       }
 
-      function sizeDosbox() {
-        const pageW = mainEl.clientWidth;
-        const viewportH = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-        const stopRow = 50, margin = 20;
-        const AR_W = 1050, AR_H = 600;
-        const availH = Math.max(240, viewportH - stopRow - margin);
-        const hFromW = Math.floor(pageW * (AR_H / AR_W));
-        const targetH = (hFromW <= availH) ? hFromW : availH;
-        const targetW = (hFromW <= availH) ? pageW : Math.floor(availH * (AR_W / AR_H));
-        elDos.style.width = targetW + 'px';
-        elDos.style.height = targetH + 'px';
-      }
-
       if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
       elDos.innerHTML = '';
       player = window.Dos(elDos, {
@@ -538,10 +577,10 @@ BUILD
         autostart: true
       });
 
-      setTimeout(()=> {
-        emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        sizeDosbox();
-      }, 80);
+      // Reliable scroll
+      waitForCanvasAndScroll();
+      setTimeout(sizeDosbox, 80);
+
     } catch (e) {
       console.error(e);
       alert('Start failed. See console.');
@@ -558,14 +597,7 @@ BUILD
   bodyEl.classList.add('no-scroll');
 
   (async ()=>{
-    await (async function waitForCOIController(timeoutMs=8000){
-      const t0 = performance.now();
-      while (performance.now() - t0 < timeoutMs) {
-        if (navigator.serviceWorker?.controller && self.crossOriginIsolated) return;
-        await new Promise(r=>setTimeout(r,120));
-      }
-      document.getElementById('coiNote').textContent = 'Note: page not isolated yet. If Start fails, hard-refresh.';
-    })();
+    await waitForCOIController().catch(()=>{});
     try { await preloadAll(); }
     catch (e) { status.textContent = 'Preload failed. Hard-refresh.'; console.error(e); }
   })();
