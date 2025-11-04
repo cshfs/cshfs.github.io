@@ -13,92 +13,102 @@
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
-<!-- Folding core + gutter (local) -->
+<!-- Folding addons: INDENT ONLY (local) -->
 <link rel="stylesheet" href="foldgutter.min.css">
 <script src="foldcode.min.js"></script>
 <script src="foldgutter.min.js"></script>
+<script src="indent-fold.min.js"></script>
 
 <!-- TASM mode -->
 <script src="tasm.js"></script>
 
 <style>
   :root{
-    /* exact outer heights match for input + buttons */
-    --ctl-h: 26px;
-    --ctl-b: 2px;   /* border width */
-    --ctl-py: 0px;  /* vertical padding inside content box */
+    --ctl-h: 28px; /* exact outer height for input + buttons */
   }
 
   /* Force white everywhere */
-  html, body { height: 100%; background:#fff !important; color:#000; }
-  body { margin: 0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
+  html, body { height:100%; background:#fff !important; color:#000; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
   body, main, section, #dosbox, #dosbox * { background:#fff !important; }
 
-  html.no-scroll, body.no-scroll { overflow-y: hidden; }
-  main { width: min(1280px, 95vw); margin: 0 auto; padding: 10px; }
-  section { margin: 10px 0; }
+  /* Prevent page scroll while emulator hidden */
+  html.no-scroll, body.no-scroll { overflow-y:hidden; }
 
-  /* Loading */
-  #loading { padding: 4px 0; }
-  #status { font-size: 13px; margin: 4px 0; }
-  progress { width: 220px; height: 10px; vertical-align: middle; }
+  main { width:min(1280px,95vw); margin:0 auto; padding:10px; }
+  section { margin:10px 0; }
+
+  /* Loading strip */
+  #loading { padding:4px 0; margin:0; }
+  #status { font-size:13px; margin:4px 0; }
+  progress { width:220px; height:10px; vertical-align:middle; }
 
   /* Workspace */
   #workspace { display:flex; flex-direction:column; gap:8px; padding-bottom:120px; }
-  #workspace.no-safe { padding-bottom: 0; }
+  #workspace.no-safe { padding-bottom:0; }
 
-  /* Controls — flat, same outer height, box-sizing border-box */
+  /* Controls row */
   .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
 
+  /* Neutral buttons — flat, strict height */
   .btn{
-    box-sizing: border-box;
-    display: inline-flex; align-items: center; justify-content: center;
-    font: inherit; font-size: 12px;
-    height: var(--ctl-h);
-    padding: var(--ctl-py) 10px;
-    border: var(--ctl-b) solid #000;
-    border-radius: 0;
+    box-sizing:border-box;
+    display:inline-flex; align-items:center; justify-content:center;
+    font:inherit; font-size:12px;
+    height:var(--ctl-h);
+    padding:0 10px;
+    border:2px solid #000; border-radius:0;
     background:#fff; color:#000; cursor:pointer;
   }
-  .btn:hover { background:#f4f4f4; }
-  .btn[disabled] { opacity:.55; cursor:not-allowed; }
+  .btn:hover{ background:#f4f4f4; }
+  .btn[disabled]{ opacity:.55; cursor:not-allowed; }
 
+  /* Kill js-dos.css min-height */
+  button, .btn, label.file.btn { min-height:0 !important; }
+
+  /* Filename input — same exact outer height */
   #fileName{
-    box-sizing: border-box;
-    -webkit-appearance: none; appearance: none;
-    font: inherit; font-size: 18px;
-    height: var(--ctl-h);
-    padding: var(--ctl-py) 10px;
-    border: var(--ctl-b) solid #000; border-radius:0;
-    width: 260px; background:#fff; color:#000;
+    box-sizing:border-box;
+    -webkit-appearance:none; appearance:none;
+    font:inherit; font-size:18px;
+    height:var(--ctl-h);
+    padding:0 10px;
+    border:2px solid #000; border-radius:0;
+    width:260px; background:#fff; color:#000;
   }
 
-  label.file { position: relative; }
+  label.file{ position:relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
   /* Editor */
-  .editor-wrap { min-height:0; display:flex; }
-  .CodeMirror { width:100%; border:2px solid #000; }
-  .CodeMirror-focused { outline: 2px solid #1115; }
-  .cm-locked .CodeMirror { opacity:.5; pointer-events:none; }
-  .CodeMirror-gutters { border-right:2px solid #000; }
-  .CodeMirror-foldgutter { width:16px; cursor:pointer; }
-  .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters { background:#fff !important; color:#000; }
+  .editor-wrap{ min-height:0; display:flex; }
+  .CodeMirror{ width:100%; border:2px solid #000; }
+  .CodeMirror-focused{ outline:2px solid #1115; }
+  .cm-locked .CodeMirror{ opacity:.5; pointer-events:none; }
+  .CodeMirror-gutters{ border-right:2px solid #000; }
+  .CodeMirror-foldgutter{ width:16px; cursor:pointer; }
+  .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters{ background:#fff !important; color:#000; }
 
   /* Fold markers */
-  .CodeMirror-foldmarker { color:#000; font-weight:700; cursor:pointer; }
-  .CodeMirror-foldgutter-open:after  { content:"▾"; color:#000; }
+  .CodeMirror-foldmarker{ color:#000; font-weight:700; cursor:pointer; }
+  .CodeMirror-foldgutter-open:after{ content:"▾"; color:#000; }
   .CodeMirror-foldgutter-closed:after{ content:"▸"; color:#000; }
 
   /* Emulator hidden until Start */
-  #emuSection { display:none; }
+  #emuSection{ display:none; }
 
-  /* DOSBox */
-  #dosbox { border:2px solid #000; width:100%; height:600px; aspect-ratio:1050/600; position:relative; }
-  #dosbox canvas { width:100% !important; height:100% !important; display:block; background:#000 !important; }
+  /* DOSBox frame */
+  #dosbox{
+    border:2px solid #000;
+    width:100%;
+    height:600px;           /* default */
+    aspect-ratio:1050/600;
+    position:relative;
+  }
+  #dosbox canvas{ width:100% !important; height:100% !important; display:block; background:#000 !important; }
 
   /* Force js-dos wrappers to white */
-  :where(.dosbox-root, .dosbox-container, .dosbox-viewport, .dosbox-overlay, .dosbox-loader, .dosbox){
+  :where(.dosbox-root,.dosbox-container,.dosbox-viewport,.dosbox-overlay,.dosbox-loader,.dosbox){
     background:#fff !important; box-shadow:none !important; border-color:#fff !important;
   }
 
@@ -116,7 +126,7 @@
 
 <script>
 /* COOP/COEP SW */
-(function registerCOI() {
+(function () {
   if (!('serviceWorker' in navigator)) return;
   const swUrl = new URL('./coi-sw.js', location.href);
   const KEY = 'coi-reloaded-once';
@@ -199,7 +209,7 @@ END start
 
 <script>
 (function(){
-  /* ===== Persistence (filename + text) ===== */
+  /* ===== Persistence keys ===== */
   const LS_KEY_NAME = 'dos_editor_name_v1';
   const LS_KEY_TEXT = 'dos_editor_text_v1';
 
@@ -216,55 +226,18 @@ END start
     indentUnit: 2,
     tabSize: 2,
     foldGutter: true,
-    gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"]
+    gutters: ["CodeMirror-linenumbers","CodeMirror-foldgutter"],
+    foldOptions: { rangeFinder: CodeMirror.fold.indent }   // indent-fold only
   });
 
-  /* --- Robust TASM folding: folds a label/PROC/SEGMENT until the next block start.
-         Comments and blank lines do NOT terminate the fold. --- */
-  (function() {
-    function isBlockStart(s){
-      if (!s) return false;
-      if (/^\s*;/.test(s)) return false;           // comment is not a block start
-      if (/^[A-Za-z_.$][\w.$]*\s*:/ .test(s)) return true;         // label:
-      if (/\bproc\b/i.test(s)) return true;                          // PROC
-      if (/^\s*endp\b/i.test(s)) return true;                        // ENDP
-      if (/^\s*(IDEAL|MODEL|CODESEG|DATASEG|STACK|ENDS?)\b/i.test(s)) return true; // segments
-      if (/^\s*END\b/i.test(s)) return true;                         // END start
-      return false;
-    }
-    function tasmFold(cmInst, start) {
-      const head = cmInst.getLine(start.line) || "";
-      if (!isBlockStart(head)) return null;
-
-      const last = cmInst.lineCount();
-      let i = start.line + 1;
-      while (i < last) {
-        const t = cmInst.getLine(i) || "";
-        if (/^\s*endp\b/i.test(t) && /\bproc\b/i.test(head)) { i++; break; } // include ENDP for PROC
-        if (isBlockStart(t)) break;  // next block starts
-        i++;
-      }
-      if (i <= start.line + 1) return null;
-
-      return {
-        from: CodeMirror.Pos(start.line, head.length),
-        to:   CodeMirror.Pos(i - 1, (cmInst.getLine(i - 1) || "").length)
-      };
-    }
-    CodeMirror.registerHelper("fold", "tasm", tasmFold);
-  })();
-
-  // Use our TASM range finder
-  cm.setOption("foldOptions", { rangeFinder: CodeMirror.fold.tasm });
-
-  // Enable gutter clicking
-  cm.on('gutterClick', (inst, line, g) => {
-    if (g === 'CodeMirror-foldgutter') {
-      inst.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: CodeMirror.fold.tasm });
+  // Gutter click -> indent-fold
+  cm.on('gutterClick', (inst, line, gutter) => {
+    if (gutter === 'CodeMirror-foldgutter') {
+      inst.foldCode(CodeMirror.Pos(line, 0), { rangeFinder: CodeMirror.fold.indent });
     }
   });
 
-  /* ===== Persist filename + content ===== */
+  /* ===== Restore/save filename + text ===== */
   const fileNameEl = document.getElementById('fileName');
   const savedName = localStorage.getItem(LS_KEY_NAME);
   const savedText = localStorage.getItem(LS_KEY_TEXT);
@@ -284,7 +257,7 @@ END start
   fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
   autoDetectTasm(fileNameEl.value);
 
-  /* ===== Sizing ===== */
+  /* ===== Editor height calculus ===== */
   const nameRow = document.getElementById('nameRow');
   const loadingBox = document.getElementById('loading');
 
@@ -383,16 +356,18 @@ BUILD
     requestAnimationFrame(() => setTimeout(sizeDosbox, 60));
   }
 
+  /* Reveal DOSBox + scroll to it */
   function revealAndScroll() {
     htmlEl.classList.remove('no-scroll');
     bodyEl.classList.remove('no-scroll');
     emuSection.style.display = 'block';
     workspace.classList.remove('no-safe');
+
     requestAnimationFrame(() => {
       resizeEditor();
       sizeDosbox();
-      emuSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      setTimeout(() => window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior: 'smooth' }), 160);
+      emuSection.scrollIntoView({ behavior:'smooth', block:'start' });
+      setTimeout(() => window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' }), 160);
     });
   }
 
@@ -402,7 +377,7 @@ BUILD
       const c = document.querySelector('#dosbox canvas');
       if (c) {
         setTimeout(() =>
-          window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior: 'smooth' })
+          window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' })
         , 120);
       } else if (performance.now() - t0 < 5000) {
         requestAnimationFrame(tick);
@@ -410,7 +385,7 @@ BUILD
     })();
   }
 
-  /* Preload */
+  /* Preload emulator + tools into CacheStorage, keep needed bytes in memory */
   const status = document.getElementById('status');
   const prog = document.getElementById('prog');
   const progText = document.getElementById('progText');
@@ -475,7 +450,7 @@ BUILD
 
   saveBtn.addEventListener('click', ()=>{
     const name = (fileNameEl.value || 'BASE.ASM');
-    const blob = new Blob([cm.getValue()], { type: 'text/plain' });
+    const blob = new Blob([cm.getValue()], { type:'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name.toUpperCase();
@@ -513,13 +488,13 @@ BUILD
       const asmBytes = encoder.encode(cm.getValue());
 
       const initFs = [
-        { path: 'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
-        { path: 'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
-        { path: dosAsmName,  contents: asmBytes },
-        { path: 'BUILD.BAT', contents: buildBatFor(dosAsmName) },
+        { path:'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
+        { path:'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
+        { path:dosAsmName,  contents: asmBytes },
+        { path:'BUILD.BAT', contents: buildBatFor(dosAsmName) },
       ];
       for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
-        const buf = toolBufs.get(p); if (buf) initFs.push({ path: p, contents: buf });
+        const buf = toolBufs.get(p); if (buf) initFs.push({ path:p, contents:buf });
       }
       for (const f of Array.from(bag.values())) {
         initFs.push({ path: toDos83(f.name), contents: new Uint8Array(await f.arrayBuffer()) });
@@ -535,16 +510,16 @@ BUILD
   });
 
   stopBtn.addEventListener('click', ()=>{
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top:0, behavior:'smooth' });
     setTimeout(()=>location.reload(), 250);
   });
 
-  // Prevent scroll initially
+  // prevent scroll initially
   htmlEl.classList.add('no-scroll');
   bodyEl.classList.add('no-scroll');
 
   (async ()=>{
-    // proceed even if COI is not ready
+    // proceed even if COI not ready
     const t0 = performance.now();
     while (performance.now() - t0 < 8000) {
       if (navigator.serviceWorker?.controller && self.crossOriginIsolated) break;
