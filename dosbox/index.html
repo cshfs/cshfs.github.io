@@ -79,17 +79,20 @@
   .btn:hover{ background:#f4f4f4 !important; }
   .btn[disabled]{ opacity:.55; cursor:not-allowed; }
 
-  /* Filename input — same exact height + same font as buttons */
-  #fileName{
+  /* Unified inputs (filename + select) */
+  #fileName,
+  .sel{
     box-sizing:border-box;
     -webkit-appearance:none; appearance:none;
     font: inherit; font-size: var(--ctl-font) !important;
     height:var(--ctl-h) !important;
     padding:0 10px !important;
     border:2px solid #000 !important; border-radius:0 !important;
-    width:260px; background:#fff; color:#000;
+    background:#fff; color:#000;
     min-height:0 !important; /* override js-dos.css */
   }
+  #fileName{ width:260px; }
+  .sel{ width:220px; }
 
   label.file{ position:relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
@@ -173,6 +176,12 @@
       <button id="loadBtn" class="btn" type="button">Load .ASM</button>
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
+
+      <!-- New: recent files dropdown -->
+      <select id="recentSel" class="sel" aria-label="Open recent">
+        <option value="">Open recent…</option>
+      </select>
+
       <button id="startBtn" class="btn" type="button" disabled>Start</button>
     </div>
 
@@ -228,8 +237,9 @@ END start
 <script>
 (function(){
   /* ===== Persistence keys ===== */
-  const LS_KEY_NAME = 'dos_editor_name_v1';
-  const LS_KEY_TEXT = 'dos_editor_text_v1';
+  const LS_KEY_NAME    = 'dos_editor_name_v1';
+  const LS_KEY_TEXT    = 'dos_editor_text_v1';
+  const LS_KEY_RECENTS = 'dos_editor_recents_v1'; // stores [{name,text,t}, ...]
 
   const htmlEl = document.documentElement;
   const bodyEl = document.body;
@@ -245,6 +255,38 @@ END start
     indentUnit: 2,
     tabSize: 2
   });
+
+  /* ===== Recent files helpers ===== */
+  const recentSel = document.getElementById('recentSel');
+
+  function loadRecents(){
+    try {
+      const arr = JSON.parse(localStorage.getItem(LS_KEY_RECENTS) || '[]');
+      return Array.isArray(arr) ? arr : [];
+    } catch { return []; }
+  }
+  function saveRecents(arr){
+    localStorage.setItem(LS_KEY_RECENTS, JSON.stringify(arr.slice(0,5)));
+    updateRecentUI();
+  }
+  function addRecent(name, text){
+    if (!name) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    let arr = loadRecents().filter(r => r && r.name !== trimmed);
+    arr.unshift({ name: trimmed, text: String(text ?? ''), t: Date.now() });
+    saveRecents(arr);
+  }
+  function updateRecentUI(){
+    const arr = loadRecents();
+    recentSel.innerHTML = '<option value="">Open recent…</option>';
+    arr.forEach((r, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = r.name;
+      recentSel.appendChild(opt);
+    });
+  }
 
   /* ===== Restore/save filename + text ===== */
   const fileNameEl = document.getElementById('fileName');
@@ -265,6 +307,22 @@ END start
   }
   fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
   autoDetectTasm(fileNameEl.value);
+
+  /* Recent select change -> load that file */
+  recentSel.addEventListener('change', () => {
+    const idx = recentSel.value ? parseInt(recentSel.value, 10) : NaN;
+    if (Number.isNaN(idx)) return;
+    const arr = loadRecents();
+    const rec = arr[idx];
+    if (!rec) return;
+    cm.setValue(rec.text);
+    fileNameEl.value = rec.name;
+    autoDetectTasm(rec.name);
+    cm.refresh();
+    persistNow();
+    // reset select back to placeholder
+    recentSel.value = '';
+  });
 
   /* ===== Editor height calculus ===== */
   const nameRow = document.getElementById('nameRow');
@@ -465,26 +523,31 @@ BUILD
 
   saveBtn.addEventListener('click', ()=>{
     const name = (fileNameEl.value || 'BASE.ASM');
-    const blob = new Blob([cm.getValue()], { type:'text/plain' });
+    const content = cm.getValue();
+    const blob = new Blob([content], { type:'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name.toUpperCase();
     a.click();
     URL.revokeObjectURL(a.href);
     persistNow();
+    addRecent(name, content);   // update recents on save
   });
 
   loadBtn.addEventListener('click', ()=> loader.click());
   loader.addEventListener('change', async ()=>{
     const f = loader.files && loader.files[0];
     if (!f) return;
-    cm.setValue(await f.text());
+    const text = await f.text();
+    cm.setValue(text);
     fileNameEl.value = f.name;
+    autoDetectTasm(f.name);
     loader.value = '';
     cm.refresh();
     resizeEditor();
     cm.focus();
     persistNow();
+    addRecent(f.name, text);    // update recents on load
   });
 
   elInput.addEventListener('change', ()=>{ for (const f of Array.from(elInput.files || [])) bag.set(f.name, f); elInput.value=''; });
@@ -545,6 +608,8 @@ BUILD
       status.textContent = 'Preload failed. Hard-refresh.';
       console.error(e);
     }
+    // build initial recent dropdown
+    updateRecentUI();
   })();
 })();
 </script>
