@@ -179,7 +179,7 @@
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
 
-      <!-- Recent files dropdown (no base injected) -->
+      <!-- Recent files dropdown -->
       <select id="recentSel" class="sel" aria-label="Open recent">
         <option value="">Open recent…</option>
       </select>
@@ -336,7 +336,24 @@ END start
   fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
   autoDetectTasm(fileNameEl.value);
 
-  /* ===== Editor sizing ===== */
+  /* ===== Open recent -> load into editor ===== */
+  recentSel.addEventListener('change', () => {
+    const val = recentSel.value;
+    if (val === '') return;                 // placeholder
+    const idx = Number(val);
+    const arr = loadRecents();
+    const rec = arr[idx];
+    if (!rec) { recentSel.value = ''; return; }
+    cm.setValue(rec.text);
+    fileNameEl.value = rec.name;
+    autoDetectTasm(rec.name);
+    cm.refresh();
+    cm.focus();
+    persistNow();
+    recentSel.value = '';                   // reset
+  });
+
+  /* ===== Editor height calculus ===== */
   const nameRow = document.getElementById('nameRow');
   function resizeEditor() {
     const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
@@ -370,7 +387,7 @@ END start
   }
 
   /* ===== Shared helpers ===== */
-  const encoder = new TextEncoder(); // single declaration to avoid redeclare errors
+  const encoder = new TextEncoder(); // single declaration
   function toDos83(name){
     const i = name.lastIndexOf('.');
     let b = (i>=0?name.slice(0,i):name).toUpperCase();
@@ -461,7 +478,7 @@ BUILD
     addRecent(name, content);
   });
 
-  // Download .ASM
+  // Download .ASM (also adds to recents)
   saveBtn.addEventListener('click', ()=>{
     const name = (fileNameEl.value || DEFAULT_BASE_NAME);
     const content = cm.getValue();
@@ -472,7 +489,7 @@ BUILD
     a.click();
     URL.revokeObjectURL(a.href);
     persistNow();
-    addRecent(name, content);   // optional: also add to recents on download
+    addRecent(name, content);
   });
 
   // Load from disk
@@ -492,10 +509,36 @@ BUILD
     addRecent(f.name, text);
   });
 
-  // Bag assets
+  // Collect extra asset files
   elInput.addEventListener('change', ()=>{ for (const f of Array.from(elInput.files || [])) bag.set(f.name, f); elInput.value=''; });
 
   // Start
+  function revealAndScroll() {
+    htmlEl.classList.remove('no-scroll');
+    bodyEl.classList.remove('no-scroll');
+    emuSection.style.display = 'block';
+    workspace.classList.remove('no-safe');
+
+    requestAnimationFrame(() => {
+      resizeEditor();
+      sizeDosbox();
+      emuSection.scrollIntoView({ behavior:'smooth', block:'start' });
+      setTimeout(() => window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' }), 160);
+    });
+  }
+  function waitForCanvasAndNudge() {
+    const t0 = performance.now();
+    (function tick(){
+      const c = document.querySelector('#dosbox canvas');
+      if (c) {
+        setTimeout(() =>
+          window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' })
+        , 120);
+      } else if (performance.now() - t0 < 5000) {
+        requestAnimationFrame(tick);
+      }
+    })();
+  }
   startBtn.addEventListener('click', async ()=>{
     try {
       persistNow();
@@ -596,34 +639,6 @@ BUILD
     overlay.style.display = 'none';
     status.textContent = 'Ready';
     resizeEditor();
-  }
-
-  // reveal + scroll helpers
-  function revealAndScroll() {
-    htmlEl.classList.remove('no-scroll');
-    bodyEl.classList.remove('no-scroll');
-    emuSection.style.display = 'block';
-    workspace.classList.remove('no-safe');
-
-    requestAnimationFrame(() => {
-      resizeEditor();
-      sizeDosbox();
-      emuSection.scrollIntoView({ behavior:'smooth', block:'start' });
-      setTimeout(() => window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' }), 160);
-    });
-  }
-  function waitForCanvasAndNudge() {
-    const t0 = performance.now();
-    (function tick(){
-      const c = document.querySelector('#dosbox canvas');
-      if (c) {
-        setTimeout(() =>
-          window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' })
-        , 120);
-      } else if (performance.now() - t0 < 5000) {
-        requestAnimationFrame(tick);
-      }
-    })();
   }
 
   // boot
