@@ -512,7 +512,7 @@ BUILD
   // Collect extra asset files
   elInput.addEventListener('change', ()=>{ for (const f of Array.from(elInput.files || [])) bag.set(f.name, f); elInput.value=''; });
 
-  // Start
+  // Start -> also save to localStorage like Save
   function revealAndScroll() {
     htmlEl.classList.remove('no-scroll');
     bodyEl.classList.remove('no-scroll');
@@ -541,7 +541,11 @@ BUILD
   }
   startBtn.addEventListener('click', async ()=>{
     try {
+      // Save like the Save button
+      const name = fileNameEl.value || DEFAULT_BASE_NAME;
+      const content = cm.getValue();
       persistNow();
+      addRecent(name, content);
 
       cm.setOption('readOnly', true);
       workspace.classList.add('cm-locked');
@@ -549,8 +553,8 @@ BUILD
 
       revealAndScroll();
 
-      const dosAsmName = toDos83(fileNameEl.value || DEFAULT_BASE_NAME);
-      const asmBytes = encoder.encode(cm.getValue());
+      const dosAsmName = toDos83(name);
+      const asmBytes = encoder.encode(content);
 
       const initFs = [
         { path:'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
