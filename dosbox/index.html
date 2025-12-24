@@ -116,7 +116,13 @@
     aspect-ratio:1050/600;
     position:relative;
   }
-  #dosbox canvas{ width:100% !important; height:100% !important; display:block; background:#000 !important; left:0 !important;}
+  #dosbox canvas{
+    width:100% !important;
+    height:100% !important;
+    display:block;
+    background:#000 !important;
+    left:0 !important; /* FIX: prevent canvas shifting right */
+  }
 
   /* Force js-dos wrappers to white */
   :where(.dosbox-root,.dosbox-container,.dosbox-viewport,.dosbox-overlay,.dosbox-loader,.dosbox){
@@ -578,10 +584,27 @@ BUILD
     }
   });
 
-  // Stop
+  // Stop (FIX: ensure we truly return to the very top before reload)
   stopBtn.addEventListener('click', ()=>{
-    window.scrollTo({ top:0, behavior:'smooth' });
-    setTimeout(()=>location.reload(), 250);
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
+    // ensure scrolling isn't locked
+    htmlEl.classList.remove('no-scroll');
+    bodyEl.classList.remove('no-scroll');
+
+    // stop emulator if possible (optional)
+    if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
+
+    // jump to absolute top immediately (no smooth scroll)
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
+    // reload only after the browser applies the scroll position
+    requestAnimationFrame(() => {
+      window.scrollTo(0, 0);
+      location.reload();
+    });
   });
 
   /* ===== Preload + overlay ===== */
@@ -667,4 +690,3 @@ BUILD
 </script>
 </body>
 </html>
-```
