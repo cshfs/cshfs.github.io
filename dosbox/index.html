@@ -3,126 +3,102 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>DOSBox — Editor + Run</title>
+<title>DOSBox — Editor + Run (Simple)</title>
 
-<!-- js-dos (local in /dosbox) -->
+<!-- js-dos (local) -->
 <link rel="stylesheet" href="js-dos.css" />
 <script src="js-dos.js"></script>
 
 <!-- CodeMirror 5 (local) -->
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
-
-<!-- TASM mode -->
 <script src="tasm.js"></script>
 
 <style>
   :root{
-    --ctl-h: 28px;
-    --ctl-font: 12px;
-    --overlay-z: 99999;
+    --ctl-h: 30px;
+    --ctl-font: 13px;
   }
 
-  *{ box-sizing:border-box; }
+  * { box-sizing: border-box; }
 
-  html, body { height:100%; background:#fff !important; color:#000; }
+  /* Keep scrollbar stable to avoid horizontal/vertical "jumps" */
+  html { overflow-y: scroll; }
   body{
     margin:0;
     font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    background:#fff;
+    color:#000;
     overflow-x:hidden; /* hard stop for any accidental horizontal overflow */
   }
 
   main{
-    width: min(1280px, 95vw);
-    margin: 0 auto;
-    padding: 10px;
+    width:min(1280px, 96vw);
+    margin:0 auto;
+    padding:12px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
   }
 
-  section{ margin: 10px 0; }
-
-  /* Full-screen preload overlay */
-  #loadingOverlay{
-    position:fixed; inset:0; z-index:var(--overlay-z);
-    display:flex; align-items:center; justify-content:center;
-    background:#fff;
+  .row{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
   }
-  #loadingCard{
-    width:min(560px, 90vw);
+
+  .btn, .inp{
+    font: inherit;
+    font-size: var(--ctl-font);
+    height: var(--ctl-h);
     border:2px solid #000;
-    padding:18px;
+    border-radius:0;
     background:#fff;
     color:#000;
+    padding:0 10px;
   }
-  #loadingTitle{ margin:0 0 8px 0; font-size:18px; }
-  #status{ font-size:13px; margin:6px 0 10px 0; }
-  progress{ width:100%; height:12px; vertical-align:middle; }
-  #metaRow{ display:flex; justify-content:space-between; font-size:12px; margin-top:6px; color:#333; }
-  .spinnerWrap{ display:flex; align-items:center; gap:12px; margin:10px 0 2px; }
-  .spinner{
-    width:18px; height:18px;
-    border:2px solid #000; border-right-color:transparent;
-    border-radius:50%;
-    animation:spin .9s linear infinite;
-  }
-  @keyframes spin{ to{ transform:rotate(360deg); } }
-
-  /* Controls row */
-  .row{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
 
   .btn{
-    display:inline-flex; align-items:center; justify-content:center;
-    font: inherit;
-    font-size: var(--ctl-font) !important;
-    height: var(--ctl-h) !important;
-    padding: 0 10px !important;
-    border:2px solid #000 !important;
-    border-radius:0 !important;
-    background:#fff !important;
-    color:#000 !important;
     cursor:pointer;
-    min-height:0 !important;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
   }
-  .btn:hover{ background:#f4f4f4 !important; }
+  .btn:hover{ background:#f4f4f4; }
   .btn[disabled]{ opacity:.55; cursor:not-allowed; }
 
-  #fileName,
-  .sel{
-    -webkit-appearance:none; appearance:none;
-    font: inherit;
-    font-size: var(--ctl-font) !important;
-    height: var(--ctl-h) !important;
-    padding:0 10px !important;
-    border:2px solid #000 !important;
-    border-radius:0 !important;
-    background:#fff;
-    color:#000;
-    min-height:0 !important;
-  }
   #fileName{ width:260px; }
-  .sel{ width:220px; }
 
   label.file{ position:relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-  /* Editor: no JS sizing — stable and predictable */
+  /* Editor sizing: CSS-only, no JS sizing */
   .CodeMirror{
     width:100%;
+    height: clamp(260px, 45vh, 700px);
     border:2px solid #000;
-    height: clamp(260px, 55vh, 680px);
   }
   .CodeMirror-gutters{ border-right:2px solid #000; }
-  .cm-locked .CodeMirror{ opacity:.5; pointer-events:none; }
 
-  /* Emulator hidden until Start */
-  #emuSection{ display:none; }
-
-  /* DOSBox frame: CSS-only sizing */
+  /* DOSBox: always visible, CSS-only sizing */
   #dosbox{
-    border:2px solid #000;
     width:100%;
-    height: clamp(260px, 60vh, 720px);
-    overflow:hidden;       /* prevents any canvas overflow from showing */
+    height: clamp(260px, 45vh, 720px);
+    border:2px solid #000;
+    overflow:hidden;          /* prevents any internal overflow from showing */
+    background:#fff;
+  }
+
+  /* Make js-dos wrappers fill the container and not add visual offsets */
+  :where(.dosbox-root,.dosbox-container,.dosbox-viewport,.dosbox){
+    width:100% !important;
+    height:100% !important;
+    margin:0 !important;
+    padding:0 !important;
     background:#fff !important;
+    box-shadow:none !important;
+    border:none !important;
   }
   #dosbox canvas{
     width:100% !important;
@@ -131,78 +107,42 @@
     background:#000 !important;
   }
 
-  /* Force js-dos wrappers to white */
-  :where(.dosbox-root,.dosbox-container,.dosbox-viewport,.dosbox-overlay,.dosbox-loader,.dosbox){
-    background:#fff !important;
-    box-shadow:none !important;
-    border-color:#fff !important;
+  #statusLine{
+    font-size: 12px;
+    color:#333;
   }
 
-  /* Notepad++-like TASM colors */
-  .cm-builtin       { color:#0070C0; }
-  .cm-variable-2    { color:#0070C0; }
-  .cm-tasm-directive{ color:#7A3E9D; }
-  .cm-tasm-label    { color:#7A3E9D; font-weight:600; }
-  .cm-keyword       { color:#0000FF; }
-  .cm-atom          { color:#008080; font-style:italic; }
-  .cm-number        { color:#C05000; }
-  .cm-comment       { color:#008000; }
-  .cm-string        { color:#A31515; }
+  .locked .CodeMirror{ opacity:.55; pointer-events:none; }
 </style>
 
 <script>
-/* COOP/COEP SW */
+/* COOP/COEP SW (keep if you rely on crossOriginIsolated) */
 (function () {
   if (!('serviceWorker' in navigator)) return;
   const swUrl = new URL('./coi-sw.js', location.href);
-  const KEY = 'coi-reloaded-once';
-  navigator.serviceWorker.register(swUrl, { scope: './' }).then(async () => {
-    if (!navigator.serviceWorker.controller && !sessionStorage.getItem(KEY)) {
-      try { await navigator.serviceWorker.ready; sessionStorage.setItem(KEY,'1'); location.reload(); } catch {}
-    }
-  });
-  navigator.serviceWorker.addEventListener('controllerchange', () => { sessionStorage.removeItem(KEY); });
+  navigator.serviceWorker.register(swUrl, { scope: './' }).catch(()=>{});
 })();
 </script>
 </head>
 
 <body>
-
-<!-- Full-screen preload overlay -->
-<div id="loadingOverlay" aria-live="polite">
-  <div id="loadingCard">
-    <h2 id="loadingTitle">Preparing DOS environment…</h2>
-    <div class="spinnerWrap">
-      <div class="spinner" aria-hidden="true"></div>
-      <div id="status">Initializing…</div>
-    </div>
-    <progress id="prog" value="0" max="100"></progress>
-    <div id="metaRow">
-      <div id="progText">0/0</div>
-      <div id="coiNote"></div>
-    </div>
-  </div>
-</div>
-
 <main>
-  <section id="workspace">
-    <div class="row" id="nameRow">
-      <input id="fileName" type="text" value="base.asm" aria-label="File name">
-      <button id="newBtn" class="btn" type="button">New file</button>
-      <button id="saveLocalBtn" class="btn" type="button">Save</button>
-      <button id="saveBtn" class="btn" type="button">Download .ASM</button>
-      <button id="loadBtn" class="btn" type="button">Load .ASM</button>
-      <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
-      <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
+  <div class="row">
+    <input id="fileName" class="inp" type="text" value="base.asm" aria-label="File name">
+    <button id="newBtn" class="btn" type="button">New</button>
+    <button id="saveLocalBtn" class="btn" type="button">Save (local)</button>
+    <button id="downloadBtn" class="btn" type="button">Download .ASM</button>
+    <button id="loadBtn" class="btn" type="button">Load .ASM</button>
+    <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
+    <label class="file btn">Choose asset files<input id="assetInput" type="file" multiple /></label>
 
-      <select id="recentSel" class="sel" aria-label="Open recent">
-        <option value="">Open recent…</option>
-      </select>
+    <button id="startBtn" class="btn" type="button" disabled>Start</button>
+    <button id="stopBtn" class="btn" type="button">Stop</button>
+  </div>
 
-      <button id="startBtn" class="btn" type="button" disabled>Start</button>
-    </div>
+  <div id="statusLine">Loading tools…</div>
 
-    <textarea id="editorTA">IDEAL
+  <textarea id="editorTA">IDEAL
 MODEL small
 STACK 100h
 DATASEG
@@ -218,42 +158,27 @@ start:
 ; --------------------------
 ; Your code here
 ; --------------------------
-  call printHello
-
+  mov dx, OFFSET msg
+  mov ah, 09h
+  int 21h
 
 exit:
   mov ax, 4c00h
   int 21h
-
-; --------------------------
-; Your procedures here
-; --------------------------
-Proc printHello
-  mov dx, OFFSET msg
-  mov ah, 09h
-  int 21h
-  mov ax, 4C00h
-  int 21h
-  ret
-endp
-
 END start
 </textarea>
-  </section>
 
-  <section id="emuSection">
-    <div id="dosbox" aria-label="DOSBox frame"></div>
-    <div class="row" style="margin-top:8px;">
-      <button id="stopBtn" class="btn" type="button">Stop</button>
-    </div>
-  </section>
+  <div id="dosbox" aria-label="DOSBox frame"></div>
 </main>
 
 <script>
 (function(){
-  /* ===== Defaults ===== */
-  const DEFAULT_BASE_NAME = 'base.asm';
-  const DEFAULT_BASE_TEXT =
+  /* ===== Simple persistence ===== */
+  const LS_NAME = 'dos_simple_name_v1';
+  const LS_TEXT = 'dos_simple_text_v1';
+
+  const DEFAULT_NAME = 'base.asm';
+  const DEFAULT_TEXT =
 `IDEAL
 MODEL small
 STACK 100h
@@ -277,12 +202,18 @@ exit:
 END start
 `;
 
-  /* ===== Persistence keys ===== */
-  const LS_KEY_NAME    = 'dos_editor_name_v1';
-  const LS_KEY_TEXT    = 'dos_editor_text_v1';
-  const LS_KEY_RECENTS = 'dos_editor_recents_v1'; // [{name,text,t}, ...] up to 5
+  const fileNameEl  = document.getElementById('fileName');
+  const statusLine  = document.getElementById('statusLine');
+  const startBtn    = document.getElementById('startBtn');
+  const stopBtn     = document.getElementById('stopBtn');
+  const newBtn      = document.getElementById('newBtn');
+  const saveLocalBtn= document.getElementById('saveLocalBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const loadBtn     = document.getElementById('loadBtn');
+  const loader      = document.getElementById('loader');
+  const assetInput  = document.getElementById('assetInput');
+  const mainEl      = document.querySelector('main');
 
-  /* ===== CodeMirror ===== */
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true,
     mode: 'tasm',
@@ -290,92 +221,22 @@ END start
     tabSize: 2
   });
 
-  /* ===== Elements ===== */
-  const workspace   = document.getElementById('workspace');
-  const emuSection  = document.getElementById('emuSection');
-  const fileNameEl  = document.getElementById('fileName');
-  const recentSel   = document.getElementById('recentSel');
-
-  const newBtn      = document.getElementById('newBtn');
-  const saveLocalBtn= document.getElementById('saveLocalBtn');
-  const saveBtn     = document.getElementById('saveBtn');
-  const loadBtn     = document.getElementById('loadBtn');
-  const loader      = document.getElementById('loader');
-  const elInput     = document.getElementById('fileInput');
-  const startBtn    = document.getElementById('startBtn');
-  const stopBtn     = document.getElementById('stopBtn');
-
-  const overlay     = document.getElementById('loadingOverlay');
-  const status      = document.getElementById('status');
-  const prog        = document.getElementById('prog');
-  const progText    = document.getElementById('progText');
-  const coiNote     = document.getElementById('coiNote');
-
-  /* ===== Recents ===== */
-  function loadRecents(){
-    try {
-      const arr = JSON.parse(localStorage.getItem(LS_KEY_RECENTS) || '[]');
-      return Array.isArray(arr) ? arr : [];
-    } catch { return []; }
-  }
-  function updateRecentUI(){
-    const arr = loadRecents();
-    recentSel.innerHTML = '<option value="">Open recent…</option>';
-    arr.forEach((r, i) => {
-      const opt = document.createElement('option');
-      opt.value = String(i);
-      opt.textContent = r.name;
-      recentSel.appendChild(opt);
-    });
-  }
-  function saveRecents(arr){
-    localStorage.setItem(LS_KEY_RECENTS, JSON.stringify(arr.slice(0,5)));
-    updateRecentUI();
-  }
-  function addRecent(name, text){
-    const trimmed = (name || '').trim();
-    if (!trimmed) return;
-    let arr = loadRecents().filter(r => r && r.name !== trimmed);
-    arr.unshift({ name: trimmed, text: String(text ?? ''), t: Date.now() });
-    saveRecents(arr);
+  function persist(){
+    localStorage.setItem(LS_NAME, fileNameEl.value || DEFAULT_NAME);
+    localStorage.setItem(LS_TEXT, cm.getValue());
   }
 
-  /* ===== Restore saved name/text ===== */
-  const savedName = localStorage.getItem(LS_KEY_NAME);
-  const savedText = localStorage.getItem(LS_KEY_TEXT);
-  if (savedName) fileNameEl.value = savedName;
+  // restore
+  fileNameEl.value = localStorage.getItem(LS_NAME) || DEFAULT_NAME;
+  const savedText = localStorage.getItem(LS_TEXT);
   if (savedText) cm.setValue(savedText);
 
-  function persistNow(){
-    localStorage.setItem(LS_KEY_NAME, fileNameEl.value || DEFAULT_BASE_NAME);
-    localStorage.setItem(LS_KEY_TEXT, cm.getValue());
-  }
-  fileNameEl.addEventListener('input', persistNow);
-  cm.on('change', () => { clearTimeout(persistNow._t); persistNow._t = setTimeout(persistNow, 120); });
+  fileNameEl.addEventListener('input', persist);
+  cm.on('change', () => { clearTimeout(persist._t); persist._t = setTimeout(persist, 120); });
 
-  function autoDetectTasm(filename){
-    cm.setOption("mode", filename.toLowerCase().endsWith(".asm") ? "tasm" : null);
-  }
-  fileNameEl.addEventListener('input', () => autoDetectTasm(fileNameEl.value));
-  autoDetectTasm(fileNameEl.value);
-
-  recentSel.addEventListener('change', () => {
-    const val = recentSel.value;
-    if (val === '') return;
-    const idx = Number(val);
-    const arr = loadRecents();
-    const rec = arr[idx];
-    if (!rec) { recentSel.value = ''; return; }
-    cm.setValue(rec.text);
-    fileNameEl.value = rec.name;
-    autoDetectTasm(rec.name);
-    cm.focus();
-    persistNow();
-    recentSel.value = '';
-  });
-
-  /* ===== Helpers ===== */
+  /* ===== Files/assets ===== */
   const encoder = new TextEncoder();
+  const bag = new Map(); // extra assets: name -> File
 
   function toDos83(name){
     const i = name.lastIndexOf('.');
@@ -386,18 +247,6 @@ END start
     e = clean(e).slice(0,3);
     return e ? `${b}.${e}` : b;
   }
-
-  const DOS_CONF = `
-[sdl]
-fullscreen=false
-
-[autoexec]
-@echo off
-mount c .
-c:
-cls
-BUILD
-`;
 
   function buildBatFor(dosAsmName){
     const base = dosAsmName.replace(/\.[^.]*$/,'');
@@ -420,44 +269,51 @@ BUILD
     return encoder.encode(lines.join("\r\n") + "\r\n");
   }
 
-  /* ===== Files/tools ===== */
-  let toolBufs = new Map();
-  const bag = new Map();
+  /* ===== js-dos start/stop ===== */
+  const dosboxEl = document.getElementById('dosbox');
   let player = null;
 
-  function startDosWith(initFs){
-    if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
-    const el = document.getElementById('dosbox');
-    el.innerHTML = '';
-    player = window.Dos(el, {
-      pathPrefix: "emulators/",
-      dosboxConf: DOS_CONF,
-      initFs,
-      noCloud: true,
-      noNetworking: true,
-      kiosk: true,
-      autostart: true
-    });
+  const DOS_CONF = `
+[sdl]
+fullscreen=false
+
+[autoexec]
+@echo off
+mount c .
+c:
+cls
+BUILD
+`;
+
+  function stopDos(){
+    if (player && typeof player.exit === 'function') {
+      try { player.exit(); } catch {}
+    }
+    player = null;
+    dosboxEl.innerHTML = '';
+    mainEl.classList.remove('locked');
+    cm.setOption('readOnly', false);
+    startBtn.disabled = false;
+    statusLine.textContent = 'Stopped.';
   }
+
+  stopBtn.addEventListener('click', stopDos);
 
   /* ===== UI actions ===== */
   newBtn.addEventListener('click', ()=>{
-    fileNameEl.value = DEFAULT_BASE_NAME;
-    cm.setValue(DEFAULT_BASE_TEXT);
-    autoDetectTasm(DEFAULT_BASE_NAME);
+    fileNameEl.value = DEFAULT_NAME;
+    cm.setValue(DEFAULT_TEXT);
     cm.focus();
-    persistNow();
+    persist();
   });
 
   saveLocalBtn.addEventListener('click', ()=>{
-    const name = fileNameEl.value || DEFAULT_BASE_NAME;
-    const content = cm.getValue();
-    persistNow();
-    addRecent(name, content);
+    persist();
+    statusLine.textContent = 'Saved locally.';
   });
 
-  saveBtn.addEventListener('click', ()=>{
-    const name = (fileNameEl.value || DEFAULT_BASE_NAME);
+  downloadBtn.addEventListener('click', ()=>{
+    const name = (fileNameEl.value || DEFAULT_NAME);
     const content = cm.getValue();
     const blob = new Blob([content], { type:'text/plain' });
     const a = document.createElement('a');
@@ -465,8 +321,8 @@ BUILD
     a.download = name.toUpperCase();
     a.click();
     URL.revokeObjectURL(a.href);
-    persistNow();
-    addRecent(name, content);
+    persist();
+    statusLine.textContent = 'Downloaded.';
   });
 
   loadBtn.addEventListener('click', ()=> loader.click());
@@ -476,31 +332,67 @@ BUILD
     const text = await f.text();
     cm.setValue(text);
     fileNameEl.value = f.name;
-    autoDetectTasm(f.name);
     loader.value = '';
     cm.focus();
-    persistNow();
-    addRecent(f.name, text);
+    persist();
+    statusLine.textContent = 'Loaded file.';
   });
 
-  elInput.addEventListener('change', ()=>{
-    for (const f of Array.from(elInput.files || [])) bag.set(f.name, f);
-    elInput.value = '';
+  assetInput.addEventListener('change', ()=>{
+    for (const f of Array.from(assetInput.files || [])) bag.set(f.name, f);
+    assetInput.value = '';
+    statusLine.textContent = `Assets: ${bag.size}`;
   });
+
+  /* ===== Tool preload (simple) ===== */
+  let toolBufs = new Map(); // filename -> Uint8Array
+
+  async function fetchBin(url){
+    const resp = await fetch(url, { cache:'reload' });
+    if (!resp.ok) throw new Error('Failed: ' + url);
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+
+  async function preloadTools(){
+    // Keep this minimal and explicit.
+    const list = [
+      ['TASM.EXE',  'tools/TASM.EXE'],
+      ['TLINK.EXE', 'tools/TLINK.EXE'],
+      // optional (only if you use them)
+      ['DPMI16BI.OVL','tools/DPMI16BI.OVL'],
+      ['RTM.EXE',     'tools/RTM.EXE'],
+      ['TD.EXE',      'tools/TD.EXE'],
+      ['TDCONFIG.TD', 'tools/TDCONFIG.TD'],
+    ];
+
+    statusLine.textContent = 'Loading tools…';
+    const loaded = new Map();
+
+    // Required first
+    for (const [name, url] of list.slice(0,2)) {
+      loaded.set(name, await fetchBin(url));
+    }
+
+    // Optional best-effort
+    for (const [name, url] of list.slice(2)) {
+      try { loaded.set(name, await fetchBin(url)); } catch {}
+    }
+
+    toolBufs = loaded;
+    startBtn.disabled = false;
+    statusLine.textContent = 'Ready.';
+  }
 
   startBtn.addEventListener('click', async ()=>{
     try {
-      const name = fileNameEl.value || DEFAULT_BASE_NAME;
-      const content = cm.getValue();
+      persist();
 
-      persistNow();
-      addRecent(name, content);
-
+      mainEl.classList.add('locked');
       cm.setOption('readOnly', true);
-      workspace.classList.add('cm-locked');
       startBtn.disabled = true;
 
-      emuSection.style.display = 'block';
+      const name = fileNameEl.value || DEFAULT_NAME;
+      const content = cm.getValue();
 
       const dosAsmName = toDos83(name);
       const asmBytes = encoder.encode(content);
@@ -508,108 +400,50 @@ BUILD
       const initFs = [
         { path:'TASM.EXE',  contents: toolBufs.get('TASM.EXE') },
         { path:'TLINK.EXE', contents: toolBufs.get('TLINK.EXE') },
-        { path:dosAsmName,  contents: asmBytes },
+        { path: dosAsmName, contents: asmBytes },
         { path:'BUILD.BAT', contents: buildBatFor(dosAsmName) },
       ];
 
-      for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
-        const buf = toolBufs.get(p);
-        if (buf) initFs.push({ path:p, contents:buf });
+      for (const opt of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
+        const buf = toolBufs.get(opt);
+        if (buf) initFs.push({ path: opt, contents: buf });
       }
 
       for (const f of Array.from(bag.values())) {
         initFs.push({ path: toDos83(f.name), contents: new Uint8Array(await f.arrayBuffer()) });
       }
 
-      startDosWith(initFs);
-      document.getElementById('dosbox').scrollIntoView({ behavior:'smooth', block:'start' });
+      // restart DOS cleanly
+      if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
+      dosboxEl.innerHTML = '';
+
+      player = window.Dos(dosboxEl, {
+        pathPrefix: "emulators/",
+        dosboxConf: DOS_CONF,
+        initFs,
+        noCloud: true,
+        noNetworking: true,
+        kiosk: true,
+        autostart: true
+      });
+
+      statusLine.textContent = 'Running…';
 
     } catch (e) {
       console.error(e);
-      alert('Start failed. See console.');
-      startBtn.disabled = false;
+      statusLine.textContent = 'Start failed (see console).';
+      mainEl.classList.remove('locked');
       cm.setOption('readOnly', false);
-      workspace.classList.remove('cm-locked');
+      startBtn.disabled = false;
     }
   });
 
-  stopBtn.addEventListener('click', ()=>{
-    if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
-    location.reload();
+  preloadTools().catch(e=>{
+    console.error(e);
+    statusLine.textContent = 'Tool preload failed (see console).';
   });
-
-  /* ===== Preload + overlay ===== */
-  async function preloadAll(){
-    status.textContent = 'Caching emulator and tools…';
-    const files = [
-      { path:'emulators/wdosbox.wasm', url:'emulators/wdosbox.wasm', required:true,  keepInMemory:false },
-      { path:'emulators/wdosbox.js',   url:'emulators/wdosbox.js',   required:false, keepInMemory:false },
-      { path:'TASM.EXE',     url:'tools/TASM.EXE',     required:true,  keepInMemory:true },
-      { path:'TLINK.EXE',    url:'tools/TLINK.EXE',    required:true,  keepInMemory:true },
-      { path:'DPMI16BI.OVL', url:'tools/DPMI16BI.OVL', required:false, keepInMemory:true },
-      { path:'RTM.EXE',      url:'tools/RTM.EXE',      required:false, keepInMemory:true },
-      { path:'TD.EXE',       url:'tools/TD.EXE',       required:false, keepInMemory:true },
-      { path:'TDCONFIG.TD',  url:'tools/TDCONFIG.TD',  required:false, keepInMemory:true },
-    ];
-
-    const cache = await caches.open('dosbox-prewarm-v10');
-    const mem = new Map();
-
-    prog.max = files.length;
-    prog.value = 0;
-    progText.textContent = `0/${files.length}`;
-
-    let done = 0;
-
-    for (const f of files) {
-      const hit = await cache.match(f.url);
-      if (hit) {
-        if (f.keepInMemory) mem.set(f.path.split('/').pop(), new Uint8Array(await hit.clone().arrayBuffer()));
-        done++; prog.value = done; progText.textContent = `${done}/${files.length}`;
-      }
-    }
-
-    for (const f of files) {
-      if (await cache.match(f.url)) continue;
-      status.textContent = `Downloading ${f.url.split('/').pop()}…`;
-      const resp = await fetch(new Request(f.url, { cache:'reload' })).catch(()=>null);
-      if (!resp || !resp.ok) {
-        if (f.required) throw new Error('Network error ' + f.url);
-      } else {
-        cache.put(f.url, resp.clone()).catch(()=>{});
-        if (f.keepInMemory) mem.set(f.path.split('/').pop(), new Uint8Array(await resp.clone().arrayBuffer()));
-      }
-      done++; prog.value = done; progText.textContent = `${done}/${files.length}`;
-    }
-
-    toolBufs = new Map(mem);
-
-    startBtn.disabled = false;
-    overlay.style.display = 'none';
-    status.textContent = 'Ready';
-  }
-
-  (async ()=>{
-    const t0 = performance.now();
-    while (performance.now() - t0 < 8000) {
-      if (navigator.serviceWorker?.controller && self.crossOriginIsolated) break;
-      await new Promise(r=>setTimeout(r,120));
-    }
-    if (!(navigator.serviceWorker?.controller && self.crossOriginIsolated)) {
-      coiNote.textContent = 'Tip: if Start fails, hard-refresh once.';
-    }
-
-    try { await preloadAll(); }
-    catch (e) {
-      status.textContent = 'Preload failed. Hard-refresh.';
-      console.error(e);
-    }
-
-    updateRecentUI();
-  })();
 
 })();
 </script>
-
 </body>
 </html>
