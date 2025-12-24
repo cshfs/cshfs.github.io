@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -19,23 +18,29 @@
 
 <style>
   :root{
-    --ctl-h: 28px;          /* exact outer height for input + buttons */
-    --ctl-font: 12px;       /* shared control font size (buttons + input) */
+    --ctl-h: 28px;
+    --ctl-font: 12px;
     --overlay-z: 99999;
   }
 
-  /* Force white everywhere */
+  *{ box-sizing:border-box; }
+
   html, body { height:100%; background:#fff !important; color:#000; }
-  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
-  body, main, section, #dosbox, #dosbox * { background:#fff !important; }
+  body{
+    margin:0;
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+    overflow-x:hidden; /* hard stop for any accidental horizontal overflow */
+  }
 
-  /* Prevent page scroll while emulator hidden and during preload */
-  html.no-scroll, body.no-scroll { overflow-y:hidden; }
+  main{
+    width: min(1280px, 95vw);
+    margin: 0 auto;
+    padding: 10px;
+  }
 
-  main { width:min(1280px,95vw); margin:0 auto; padding:10px; }
-  section { margin:10px 0; }
+  section{ margin: 10px 0; }
 
-  /* -------- Full-screen loading overlay -------- */
+  /* Full-screen preload overlay */
   #loadingOverlay{
     position:fixed; inset:0; z-index:var(--overlay-z);
     display:flex; align-items:center; justify-content:center;
@@ -43,54 +48,55 @@
   }
   #loadingCard{
     width:min(560px, 90vw);
-    border:2px solid #000; padding:18px; box-sizing:border-box;
-    background:#fff; color:#000;
+    border:2px solid #000;
+    padding:18px;
+    background:#fff;
+    color:#000;
   }
   #loadingTitle{ margin:0 0 8px 0; font-size:18px; }
   #status{ font-size:13px; margin:6px 0 10px 0; }
-  progress { width:100%; height:12px; vertical-align:middle; }
+  progress{ width:100%; height:12px; vertical-align:middle; }
   #metaRow{ display:flex; justify-content:space-between; font-size:12px; margin-top:6px; color:#333; }
-
-  /* Spinner */
   .spinnerWrap{ display:flex; align-items:center; gap:12px; margin:10px 0 2px; }
   .spinner{
-    width:18px; height:18px; border:2px solid #000; border-right-color:transparent;
-    border-radius:50%; animation:spin .9s linear infinite;
+    width:18px; height:18px;
+    border:2px solid #000; border-right-color:transparent;
+    border-radius:50%;
+    animation:spin .9s linear infinite;
   }
-  @keyframes spin{ to { transform:rotate(360deg); } }
-
-  /* Workspace */
-  #workspace { display:flex; flex-direction:column; gap:8px; padding-bottom:120px; }
-  #workspace.no-safe { padding-bottom:0; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
 
   /* Controls row */
-  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .row{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
 
-  /* Buttons — flat, strict height, unified font */
   .btn{
-    box-sizing:border-box;
     display:inline-flex; align-items:center; justify-content:center;
-    font: inherit; font-size: var(--ctl-font) !important;
-    height:var(--ctl-h) !important;
-    padding:0 10px !important;
-    border:2px solid #000 !important; border-radius:0 !important;
-    background:#fff !important; color:#000 !important; cursor:pointer;
-    min-height:0 !important; /* override js-dos.css */
+    font: inherit;
+    font-size: var(--ctl-font) !important;
+    height: var(--ctl-h) !important;
+    padding: 0 10px !important;
+    border:2px solid #000 !important;
+    border-radius:0 !important;
+    background:#fff !important;
+    color:#000 !important;
+    cursor:pointer;
+    min-height:0 !important;
   }
   .btn:hover{ background:#f4f4f4 !important; }
   .btn[disabled]{ opacity:.55; cursor:not-allowed; }
 
-  /* Unified inputs (filename + select) */
   #fileName,
   .sel{
-    box-sizing:border-box;
     -webkit-appearance:none; appearance:none;
-    font: inherit; font-size: var(--ctl-font) !important;
-    height:var(--ctl-h) !important;
+    font: inherit;
+    font-size: var(--ctl-font) !important;
+    height: var(--ctl-h) !important;
     padding:0 10px !important;
-    border:2px solid #000 !important; border-radius:0 !important;
-    background:#fff; color:#000;
-    min-height:0 !important; /* override js-dos.css */
+    border:2px solid #000 !important;
+    border-radius:0 !important;
+    background:#fff;
+    color:#000;
+    min-height:0 !important;
   }
   #fileName{ width:260px; }
   .sel{ width:220px; }
@@ -98,35 +104,38 @@
   label.file{ position:relative; }
   label.file input[type=file]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-  /* Editor */
-  .editor-wrap{ min-height:0; display:flex; }
-  .CodeMirror{ width:100%; border:2px solid #000; }
-  .CodeMirror-focused{ outline:2px solid #1115; }
-  .cm-locked .CodeMirror{ opacity:.5; pointer-events:none; }
+  /* Editor: no JS sizing — stable and predictable */
+  .CodeMirror{
+    width:100%;
+    border:2px solid #000;
+    height: clamp(260px, 55vh, 680px);
+  }
   .CodeMirror-gutters{ border-right:2px solid #000; }
-  .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters{ background:#fff !important; color:#000; }
+  .cm-locked .CodeMirror{ opacity:.5; pointer-events:none; }
 
   /* Emulator hidden until Start */
   #emuSection{ display:none; }
 
-  /* DOSBox frame */
+  /* DOSBox frame: CSS-only sizing */
   #dosbox{
     border:2px solid #000;
     width:100%;
-    height:600px;           /* default */
-    aspect-ratio:1050/600;
-    position:relative;
-
-    /* FIX: prevent right overflow due to main padding + borders */
-    box-sizing:border-box;  /* width includes border */
-    max-width:100%;
-    margin:0 auto;          /* keep centered when narrower */
+    height: clamp(260px, 60vh, 720px);
+    overflow:hidden;       /* prevents any canvas overflow from showing */
+    background:#fff !important;
   }
-  #dosbox canvas{ width:100% !important; height:100% !important; display:block; background:#000 !important; }
+  #dosbox canvas{
+    width:100% !important;
+    height:100% !important;
+    display:block;
+    background:#000 !important;
+  }
 
   /* Force js-dos wrappers to white */
   :where(.dosbox-root,.dosbox-container,.dosbox-viewport,.dosbox-overlay,.dosbox-loader,.dosbox){
-    background:#fff !important; box-shadow:none !important; border-color:#fff !important;
+    background:#fff !important;
+    box-shadow:none !important;
+    border-color:#fff !important;
   }
 
   /* Notepad++-like TASM colors */
@@ -156,7 +165,8 @@
 })();
 </script>
 </head>
-<body class="no-scroll">
+
+<body>
 
 <!-- Full-screen preload overlay -->
 <div id="loadingOverlay" aria-live="polite">
@@ -175,7 +185,7 @@
 </div>
 
 <main>
-  <section id="workspace" class="no-safe">
+  <section id="workspace">
     <div class="row" id="nameRow">
       <input id="fileName" type="text" value="base.asm" aria-label="File name">
       <button id="newBtn" class="btn" type="button">New file</button>
@@ -185,7 +195,6 @@
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
 
-      <!-- Recent files dropdown -->
       <select id="recentSel" class="sel" aria-label="Open recent">
         <option value="">Open recent…</option>
       </select>
@@ -193,8 +202,7 @@
       <button id="startBtn" class="btn" type="button" disabled>Start</button>
     </div>
 
-    <div class="editor-wrap">
-<textarea id="editorTA">IDEAL
+    <textarea id="editorTA">IDEAL
 MODEL small
 STACK 100h
 DATASEG
@@ -211,8 +219,8 @@ start:
 ; Your code here
 ; --------------------------
   call printHello
-  
-  
+
+
 exit:
   mov ax, 4c00h
   int 21h
@@ -231,7 +239,6 @@ endp
 
 END start
 </textarea>
-    </div>
   </section>
 
   <section id="emuSection">
@@ -258,29 +265,22 @@ DATASEG
 
 CODESEG
 start:
-\tmov ax, @data
-\tmov ds, ax
+  mov ax, @data
+  mov ds, ax
 ; --------------------------
 ; Your code here
 ; --------------------------
-\t
+
 exit:
-\tmov ax, 4c00h
-\tint 21h
+  mov ax, 4c00h
+  int 21h
 END start
 `;
 
   /* ===== Persistence keys ===== */
   const LS_KEY_NAME    = 'dos_editor_name_v1';
   const LS_KEY_TEXT    = 'dos_editor_text_v1';
-  const LS_KEY_RECENTS = 'dos_editor_recents_v1'; // stores [{name,text,t}, ...] up to 5
-
-  const htmlEl = document.documentElement;
-  const bodyEl = document.body;
-  const workspace = document.getElementById('workspace');
-  const emuSection = document.getElementById('emuSection');
-  const mainEl = document.querySelector('main');
-  const overlay = document.getElementById('loadingOverlay');
+  const LS_KEY_RECENTS = 'dos_editor_recents_v1'; // [{name,text,t}, ...] up to 5
 
   /* ===== CodeMirror ===== */
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
@@ -290,7 +290,26 @@ END start
     tabSize: 2
   });
 
-  const recentSel = document.getElementById('recentSel');
+  /* ===== Elements ===== */
+  const workspace   = document.getElementById('workspace');
+  const emuSection  = document.getElementById('emuSection');
+  const fileNameEl  = document.getElementById('fileName');
+  const recentSel   = document.getElementById('recentSel');
+
+  const newBtn      = document.getElementById('newBtn');
+  const saveLocalBtn= document.getElementById('saveLocalBtn');
+  const saveBtn     = document.getElementById('saveBtn');
+  const loadBtn     = document.getElementById('loadBtn');
+  const loader      = document.getElementById('loader');
+  const elInput     = document.getElementById('fileInput');
+  const startBtn    = document.getElementById('startBtn');
+  const stopBtn     = document.getElementById('stopBtn');
+
+  const overlay     = document.getElementById('loadingOverlay');
+  const status      = document.getElementById('status');
+  const prog        = document.getElementById('prog');
+  const progText    = document.getElementById('progText');
+  const coiNote     = document.getElementById('coiNote');
 
   /* ===== Recents ===== */
   function loadRecents(){
@@ -298,18 +317,6 @@ END start
       const arr = JSON.parse(localStorage.getItem(LS_KEY_RECENTS) || '[]');
       return Array.isArray(arr) ? arr : [];
     } catch { return []; }
-  }
-  function saveRecents(arr){
-    localStorage.setItem(LS_KEY_RECENTS, JSON.stringify(arr.slice(0,5)));
-    updateRecentUI();
-  }
-  function addRecent(name, text){
-    if (!name) return;
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    let arr = loadRecents().filter(r => r && r.name !== trimmed);
-    arr.unshift({ name: trimmed, text: String(text ?? ''), t: Date.now() });
-    saveRecents(arr);
   }
   function updateRecentUI(){
     const arr = loadRecents();
@@ -321,9 +328,19 @@ END start
       recentSel.appendChild(opt);
     });
   }
+  function saveRecents(arr){
+    localStorage.setItem(LS_KEY_RECENTS, JSON.stringify(arr.slice(0,5)));
+    updateRecentUI();
+  }
+  function addRecent(name, text){
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    let arr = loadRecents().filter(r => r && r.name !== trimmed);
+    arr.unshift({ name: trimmed, text: String(text ?? ''), t: Date.now() });
+    saveRecents(arr);
+  }
 
-  /* ===== Restore/save filename + text ===== */
-  const fileNameEl = document.getElementById('fileName');
+  /* ===== Restore saved name/text ===== */
   const savedName = localStorage.getItem(LS_KEY_NAME);
   const savedText = localStorage.getItem(LS_KEY_TEXT);
   if (savedName) fileNameEl.value = savedName;
@@ -336,16 +353,15 @@ END start
   fileNameEl.addEventListener('input', persistNow);
   cm.on('change', () => { clearTimeout(persistNow._t); persistNow._t = setTimeout(persistNow, 120); });
 
-  function autoDetectTasm(filename) {
+  function autoDetectTasm(filename){
     cm.setOption("mode", filename.toLowerCase().endsWith(".asm") ? "tasm" : null);
   }
-  fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
+  fileNameEl.addEventListener('input', () => autoDetectTasm(fileNameEl.value));
   autoDetectTasm(fileNameEl.value);
 
-  /* ===== Open recent -> load into editor ===== */
   recentSel.addEventListener('change', () => {
     const val = recentSel.value;
-    if (val === '') return;                 // placeholder
+    if (val === '') return;
     const idx = Number(val);
     const arr = loadRecents();
     const rec = arr[idx];
@@ -353,63 +369,22 @@ END start
     cm.setValue(rec.text);
     fileNameEl.value = rec.name;
     autoDetectTasm(rec.name);
-    cm.refresh();
     cm.focus();
     persistNow();
-    recentSel.value = '';                   // reset
+    recentSel.value = '';
   });
 
-  /* ===== Editor height calculus ===== */
-  const nameRow = document.getElementById('nameRow');
-  function resizeEditor() {
-    const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    const mainPad = getComputedStyle(mainEl);
-    const pad = parseInt(mainPad.paddingTop) + parseInt(mainPad.paddingBottom);
-    const wsStyle = getComputedStyle(workspace);
-    const wsMargins = parseInt(wsStyle.marginTop) + parseInt(wsStyle.marginBottom);
-    const nameH = nameRow.offsetHeight;
-    const SAFE = workspace.classList.contains('no-safe') ? 0 : 120;
-    const target = Math.max(180, vh - pad - wsMargins - nameH - SAFE);
-    cm.setSize(null, target);
-    cm.refresh();
-  }
-  window.addEventListener('resize', resizeEditor);
-  if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeEditor);
-  setTimeout(resizeEditor, 0);
+  /* ===== Helpers ===== */
+  const encoder = new TextEncoder();
 
-  /* ===== DOSBox sizing ===== */
-  const AR_W = 1050, AR_H = 600;
-  const elDos = document.getElementById('dosbox');
-
-  function sizeDosbox() {
-    /* FIX: use inner content width of <main> (exclude padding) */
-    const cs = getComputedStyle(mainEl);
-    const innerW =
-      mainEl.clientWidth
-      - parseFloat(cs.paddingLeft)
-      - parseFloat(cs.paddingRight);
-
-    const viewportH = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    const stopRow = 50, margin = 20;
-    const availH = Math.max(240, viewportH - stopRow - margin);
-
-    const hFromW = Math.floor(innerW * (AR_H / AR_W));
-    const targetH = (hFromW <= availH) ? hFromW : availH;
-    const targetW = (hFromW <= availH) ? innerW : Math.floor(availH * (AR_W / AR_H));
-
-    elDos.style.width = Math.floor(targetW) + 'px';
-    elDos.style.height = Math.floor(targetH) + 'px';
-  }
-
-  /* ===== Shared helpers ===== */
-  const encoder = new TextEncoder(); // single declaration
   function toDos83(name){
     const i = name.lastIndexOf('.');
     let b = (i>=0?name.slice(0,i):name).toUpperCase();
     let e = (i>=0?name.slice(i+1):'').toUpperCase();
     const clean = s=>s.replace(/[^A-Z0-9]/g,'_');
-    b = clean(b).slice(0,8); e = clean(e).slice(0,3);
-    return e?`${b}.${e}`:b;
+    b = clean(b).slice(0,8);
+    e = clean(e).slice(0,3);
+    return e ? `${b}.${e}` : b;
   }
 
   const DOS_CONF = `
@@ -445,9 +420,10 @@ BUILD
     return encoder.encode(lines.join("\r\n") + "\r\n");
   }
 
+  /* ===== Files/tools ===== */
   let toolBufs = new Map();
-  let player = null;
   const bag = new Map();
+  let player = null;
 
   function startDosWith(initFs){
     if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
@@ -462,30 +438,17 @@ BUILD
       kiosk: true,
       autostart: true
     });
-    requestAnimationFrame(() => setTimeout(sizeDosbox, 60));
   }
 
   /* ===== UI actions ===== */
-  const newBtn      = document.getElementById('newBtn');
-  const saveLocalBtn= document.getElementById('saveLocalBtn');
-  const saveBtn     = document.getElementById('saveBtn');
-  const loadBtn     = document.getElementById('loadBtn');
-  const loader      = document.getElementById('loader');
-  const elInput     = document.getElementById('fileInput');
-  const startBtn    = document.getElementById('startBtn');
-  const stopBtn     = document.getElementById('stopBtn');
-
-  // New file -> reset editor to base template
   newBtn.addEventListener('click', ()=>{
     fileNameEl.value = DEFAULT_BASE_NAME;
     cm.setValue(DEFAULT_BASE_TEXT);
     autoDetectTasm(DEFAULT_BASE_NAME);
-    cm.refresh();
     cm.focus();
     persistNow();
   });
 
-  // Save to local storage (recents)
   saveLocalBtn.addEventListener('click', ()=>{
     const name = fileNameEl.value || DEFAULT_BASE_NAME;
     const content = cm.getValue();
@@ -493,7 +456,6 @@ BUILD
     addRecent(name, content);
   });
 
-  // Download .ASM (also adds to recents)
   saveBtn.addEventListener('click', ()=>{
     const name = (fileNameEl.value || DEFAULT_BASE_NAME);
     const content = cm.getValue();
@@ -507,7 +469,6 @@ BUILD
     addRecent(name, content);
   });
 
-  // Load from disk
   loadBtn.addEventListener('click', ()=> loader.click());
   loader.addEventListener('change', async ()=>{
     const f = loader.files && loader.files[0];
@@ -517,48 +478,21 @@ BUILD
     fileNameEl.value = f.name;
     autoDetectTasm(f.name);
     loader.value = '';
-    cm.refresh();
-    resizeEditor();
     cm.focus();
     persistNow();
     addRecent(f.name, text);
   });
 
-  // Collect extra asset files
-  elInput.addEventListener('change', ()=>{ for (const f of Array.from(elInput.files || [])) bag.set(f.name, f); elInput.value=''; });
+  elInput.addEventListener('change', ()=>{
+    for (const f of Array.from(elInput.files || [])) bag.set(f.name, f);
+    elInput.value = '';
+  });
 
-  // Start -> also save to localStorage like Save
-  function revealAndScroll() {
-    htmlEl.classList.remove('no-scroll');
-    bodyEl.classList.remove('no-scroll');
-    emuSection.style.display = 'block';
-    workspace.classList.remove('no-safe');
-
-    requestAnimationFrame(() => {
-      resizeEditor();
-      sizeDosbox();
-      emuSection.scrollIntoView({ behavior:'smooth', block:'start' });
-      setTimeout(() => window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' }), 160);
-    });
-  }
-  function waitForCanvasAndNudge() {
-    const t0 = performance.now();
-    (function tick(){
-      const c = document.querySelector('#dosbox canvas');
-      if (c) {
-        setTimeout(() =>
-          window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' })
-        , 120);
-      } else if (performance.now() - t0 < 5000) {
-        requestAnimationFrame(tick);
-      }
-    })();
-  }
   startBtn.addEventListener('click', async ()=>{
     try {
-      // Save like the Save button
       const name = fileNameEl.value || DEFAULT_BASE_NAME;
       const content = cm.getValue();
+
       persistNow();
       addRecent(name, content);
 
@@ -566,7 +500,7 @@ BUILD
       workspace.classList.add('cm-locked');
       startBtn.disabled = true;
 
-      revealAndScroll();
+      emuSection.style.display = 'block';
 
       const dosAsmName = toDos83(name);
       const asmBytes = encoder.encode(content);
@@ -577,34 +511,34 @@ BUILD
         { path:dosAsmName,  contents: asmBytes },
         { path:'BUILD.BAT', contents: buildBatFor(dosAsmName) },
       ];
+
       for (const p of ['DPMI16BI.OVL','RTM.EXE','TD.EXE','TDCONFIG.TD']) {
-        const buf = toolBufs.get(p); if (buf) initFs.push({ path:p, contents:buf });
+        const buf = toolBufs.get(p);
+        if (buf) initFs.push({ path:p, contents:buf });
       }
+
       for (const f of Array.from(bag.values())) {
         initFs.push({ path: toDos83(f.name), contents: new Uint8Array(await f.arrayBuffer()) });
       }
 
       startDosWith(initFs);
-      waitForCanvasAndNudge();
+      document.getElementById('dosbox').scrollIntoView({ behavior:'smooth', block:'start' });
 
     } catch (e) {
       console.error(e);
       alert('Start failed. See console.');
+      startBtn.disabled = false;
+      cm.setOption('readOnly', false);
+      workspace.classList.remove('cm-locked');
     }
   });
 
-  // Stop
   stopBtn.addEventListener('click', ()=>{
-    window.scrollTo({ top:0, behavior:'smooth' });
-    setTimeout(()=>location.reload(), 250);
+    if (player && typeof player.exit === 'function') { try { player.exit(); } catch {} }
+    location.reload();
   });
 
   /* ===== Preload + overlay ===== */
-  const status = document.getElementById('status');
-  const prog = document.getElementById('prog');
-  const progText = document.getElementById('progText');
-  const coiNote = document.getElementById('coiNote');
-
   async function preloadAll(){
     status.textContent = 'Caching emulator and tools…';
     const files = [
@@ -617,21 +551,24 @@ BUILD
       { path:'TD.EXE',       url:'tools/TD.EXE',       required:false, keepInMemory:true },
       { path:'TDCONFIG.TD',  url:'tools/TDCONFIG.TD',  required:false, keepInMemory:true },
     ];
+
     const cache = await caches.open('dosbox-prewarm-v10');
     const mem = new Map();
 
-    let total = files.length, done = 0;
-    prog.max = total; prog.value = 0; progText.textContent = `0/${total}`;
+    prog.max = files.length;
+    prog.value = 0;
+    progText.textContent = `0/${files.length}`;
 
-    // cached first
+    let done = 0;
+
     for (const f of files) {
       const hit = await cache.match(f.url);
       if (hit) {
-        done++; prog.value = done; progText.textContent = `${done}/${total}`;
-        if (f.keepInMemory) mem.set(f.path, new Uint8Array(await hit.clone().arrayBuffer()));
+        if (f.keepInMemory) mem.set(f.path.split('/').pop(), new Uint8Array(await hit.clone().arrayBuffer()));
+        done++; prog.value = done; progText.textContent = `${done}/${files.length}`;
       }
     }
-    // fetch missing
+
     for (const f of files) {
       if (await cache.match(f.url)) continue;
       status.textContent = `Downloading ${f.url.split('/').pop()}…`;
@@ -640,27 +577,18 @@ BUILD
         if (f.required) throw new Error('Network error ' + f.url);
       } else {
         cache.put(f.url, resp.clone()).catch(()=>{});
-        if (f.keepInMemory) mem.set(f.path, new Uint8Array(await resp.clone().arrayBuffer()));
+        if (f.keepInMemory) mem.set(f.path.split('/').pop(), new Uint8Array(await resp.clone().arrayBuffer()));
       }
-      done++; prog.value = done; progText.textContent = `${done}/${total}`;
+      done++; prog.value = done; progText.textContent = `${done}/${files.length}`;
     }
-    // ensure RAM copies
-    for (const f of files) {
-      if (!f.keepInMemory || mem.has(f.path)) continue;
-      const hit = await cache.match(f.url);
-      if (hit) mem.set(f.path, new Uint8Array(await hit.clone().arrayBuffer()));
-    }
-    // publish
-    toolBufs = new Map();
-    for (const [k,v] of mem.entries()) toolBufs.set(k.split('/').pop(), v);
 
-    document.getElementById('startBtn').disabled = false;
+    toolBufs = new Map(mem);
+
+    startBtn.disabled = false;
     overlay.style.display = 'none';
     status.textContent = 'Ready';
-    resizeEditor();
   }
 
-  // boot
   (async ()=>{
     const t0 = performance.now();
     while (performance.now() - t0 < 8000) {
@@ -670,16 +598,18 @@ BUILD
     if (!(navigator.serviceWorker?.controller && self.crossOriginIsolated)) {
       coiNote.textContent = 'Tip: if Start fails, hard-refresh once.';
     }
+
     try { await preloadAll(); }
     catch (e) {
       status.textContent = 'Preload failed. Hard-refresh.';
       console.error(e);
     }
+
     updateRecentUI();
   })();
 
 })();
 </script>
+
 </body>
 </html>
-```
