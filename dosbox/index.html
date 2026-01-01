@@ -191,6 +191,10 @@
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
 
+      <!-- NEW: fold/unfold all procedures -->
+      <button id="foldAllBtn" class="btn" type="button" title="Fold all procedures">Fold all</button>
+      <button id="unfoldAllBtn" class="btn" type="button" title="Unfold all procedures">Unfold all</button>
+
       <!-- Recent files dropdown -->
       <select id="recentSel" class="sel" aria-label="Open recent">
         <option value="">Open recent…</option>
@@ -338,6 +342,30 @@ END start
       "Ctrl-Q": (cm) => cm.foldCode(cm.getCursor(), { rangeFinder: CodeMirror.fold.tasmProc })
     }
   });
+
+  /* ===== NEW: fold/unfold-all helpers + button wiring ===== */
+  function foldAllProcs(){
+    cm.operation(() => {
+      for (let i = cm.firstLine(); i <= cm.lastLine(); i++) {
+        if (CodeMirror.fold.tasmProc(cm, CodeMirror.Pos(i, 0))) {
+          cm.foldCode(CodeMirror.Pos(i, 0), { rangeFinder: CodeMirror.fold.tasmProc });
+        }
+      }
+    });
+  }
+
+  function unfoldAllProcs(){
+    cm.operation(() => {
+      // Clear every fold mark (fold marks have __isFold)
+      for (let i = cm.firstLine(); i <= cm.lastLine(); i++) {
+        const marks = cm.findMarksAt(CodeMirror.Pos(i, 0));
+        for (const m of marks) if (m && m.__isFold) m.clear();
+      }
+    });
+  }
+
+  document.getElementById('foldAllBtn').addEventListener('click', foldAllProcs);
+  document.getElementById('unfoldAllBtn').addEventListener('click', unfoldAllProcs);
 
   const recentSel = document.getElementById('recentSel');
 
