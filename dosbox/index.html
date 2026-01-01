@@ -191,7 +191,7 @@
       <input id="loader" type="file" accept=".asm,.inc,.txt" style="display:none" />
       <label class="file btn">Choose asset files<input id="fileInput" type="file" multiple /></label>
 
-      <!-- NEW: fold/unfold all procedures -->
+      <!-- Fold / Unfold -->
       <button id="foldAllBtn" class="btn" type="button" title="Fold all procedures">Fold all</button>
       <button id="unfoldAllBtn" class="btn" type="button" title="Unfold all procedures">Unfold all</button>
 
@@ -316,7 +316,6 @@ END start
 
     for (let i = start.line + 1, last = cm.lastLine(); i <= last; i++) {
       if (endRe.test(cm.getLine(i))) {
-        // Fold everything after the PROC line up to (but not including) the ENDP line
         return {
           from: CodeMirror.Pos(start.line, lineText.length),
           to: CodeMirror.Pos(i, 0)
@@ -343,23 +342,27 @@ END start
     }
   });
 
-  /* ===== NEW: fold/unfold-all helpers + button wiring ===== */
-  function foldAllProcs(){
+  /* ===== Fold/unfold-all helpers ===== */
+  function unfoldAllProcs(){
     cm.operation(() => {
-      for (let i = cm.firstLine(); i <= cm.lastLine(); i++) {
-        if (CodeMirror.fold.tasmProc(cm, CodeMirror.Pos(i, 0))) {
-          cm.foldCode(CodeMirror.Pos(i, 0), { rangeFinder: CodeMirror.fold.tasmProc });
-        }
+      const marks = cm.getAllMarks();
+      for (const m of marks) {
+        if (m && m.__isFold) m.clear();
       }
     });
   }
 
-  function unfoldAllProcs(){
+  function foldAllProcs(){
     cm.operation(() => {
-      // Clear every fold mark (fold marks have __isFold)
+      // deterministic: clear first, then fold
+      const marks = cm.getAllMarks();
+      for (const m of marks) {
+        if (m && m.__isFold) m.clear();
+      }
       for (let i = cm.firstLine(); i <= cm.lastLine(); i++) {
-        const marks = cm.findMarksAt(CodeMirror.Pos(i, 0));
-        for (const m of marks) if (m && m.__isFold) m.clear();
+        if (CodeMirror.fold.tasmProc(cm, CodeMirror.Pos(i, 0))) {
+          cm.foldCode(CodeMirror.Pos(i, 0), { rangeFinder: CodeMirror.fold.tasmProc });
+        }
       }
     });
   }
@@ -419,21 +422,25 @@ END start
   fileNameEl.addEventListener("input", () => autoDetectTasm(fileNameEl.value));
   autoDetectTasm(fileNameEl.value);
 
-  /* ===== Open recent -> load into editor ===== */
+  /* ===== Open recent -> load into editor (and fold by default) ===== */
   recentSel.addEventListener('change', () => {
     const val = recentSel.value;
-    if (val === '') return;                 // placeholder
+    if (val === '') return;
     const idx = Number(val);
     const arr = loadRecents();
     const rec = arr[idx];
     if (!rec) { recentSel.value = ''; return; }
+
     cm.setValue(rec.text);
     fileNameEl.value = rec.name;
     autoDetectTasm(rec.name);
+
     cm.refresh();
+    foldAllProcs();           // folded by default
+
     cm.focus();
     persistNow();
-    recentSel.value = '';                   // reset
+    recentSel.value = '';
   });
 
   /* ===== Editor height calculus ===== */
@@ -454,6 +461,12 @@ END start
   if (window.visualViewport) window.visualViewport.addEventListener('resize', resizeEditor);
   setTimeout(resizeEditor, 0);
 
+  /* ===== Fold by default on refresh/load ===== */
+  setTimeout(() => {
+    cm.refresh();
+    foldAllProcs();
+  }, 0);
+
   /* ===== DOSBox sizing ===== */
   const AR_W = 1050, AR_H = 600;
   const elDos = document.getElementById('dosbox');
@@ -470,7 +483,7 @@ END start
   }
 
   /* ===== Shared helpers ===== */
-  const encoder = new TextEncoder(); // single declaration
+  const encoder = new TextEncoder();
   function toDos83(name){
     const i = name.lastIndexOf('.');
     let b = (i>=0?name.slice(0,i):name).toUpperCase();
@@ -534,21 +547,22 @@ BUILD
   }
 
   /* ===== UI actions ===== */
-  const newBtn      = document.getElementById('newBtn');
-  const saveLocalBtn= document.getElementById('saveLocalBtn');
-  const saveBtn     = document.getElementById('saveBtn');
-  const loadBtn     = document.getElementById('loadBtn');
-  const loader      = document.getElementById('loader');
-  const elInput     = document.getElementById('fileInput');
-  const startBtn    = document.getElementById('startBtn');
-  const stopBtn     = document.getElementById('stopBtn');
+  const newBtn       = document.getElementById('newBtn');
+  const saveLocalBtn = document.getElementById('saveLocalBtn');
+  const saveBtn      = document.getElementById('saveBtn');
+  const loadBtn      = document.getElementById('loadBtn');
+  const loader       = document.getElementById('loader');
+  const elInput      = document.getElementById('fileInput');
+  const startBtn     = document.getElementById('startBtn');
+  const stopBtn      = document.getElementById('stopBtn');
 
-  // New file -> reset editor to base template
+  // New file -> reset editor to base template (and fold by default)
   newBtn.addEventListener('click', ()=>{
     fileNameEl.value = DEFAULT_BASE_NAME;
     cm.setValue(DEFAULT_BASE_TEXT);
     autoDetectTasm(DEFAULT_BASE_NAME);
     cm.refresh();
+    foldAllProcs();          // folded by default
     cm.focus();
     persistNow();
   });
@@ -575,7 +589,7 @@ BUILD
     addRecent(name, content);
   });
 
-  // Load from disk
+  // Load from disk (and fold by default)
   loadBtn.addEventListener('click', ()=> loader.click());
   loader.addEventListener('change', async ()=>{
     const f = loader.files && loader.files[0];
@@ -584,8 +598,11 @@ BUILD
     cm.setValue(text);
     fileNameEl.value = f.name;
     autoDetectTasm(f.name);
-    loader.value = '';
+
     cm.refresh();
+    foldAllProcs();          // folded by default
+
+    loader.value = '';
     resizeEditor();
     cm.focus();
     persistNow();
@@ -593,7 +610,10 @@ BUILD
   });
 
   // Collect extra asset files
-  elInput.addEventListener('change', ()=>{ for (const f of Array.from(elInput.files || [])) bag.set(f.name, f); elInput.value=''; });
+  elInput.addEventListener('change', ()=>{
+    for (const f of Array.from(elInput.files || [])) bag.set(f.name, f);
+    elInput.value='';
+  });
 
   // Start -> also save to localStorage like Save
   function revealAndScroll() {
@@ -609,6 +629,7 @@ BUILD
       setTimeout(() => window.scrollTo({ top: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight), behavior:'smooth' }), 160);
     });
   }
+
   function waitForCanvasAndNudge() {
     const t0 = performance.now();
     (function tick(){
@@ -622,6 +643,7 @@ BUILD
       }
     })();
   }
+
   startBtn.addEventListener('click', async ()=>{
     try {
       // Save like the Save button
@@ -661,7 +683,7 @@ BUILD
     }
   });
 
-  // Stop (FIX: ensure we truly return to the very top before reload)
+  // Stop (ensure we truly return to the very top before reload)
   stopBtn.addEventListener('click', ()=>{
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
