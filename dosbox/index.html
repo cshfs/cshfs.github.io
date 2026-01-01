@@ -13,6 +13,12 @@
 <link rel="stylesheet" href="codemirror.min.css">
 <script src="codemirror.min.js"></script>
 
+<!-- CodeMirror folding (local, same directory as this HTML) -->
+<link rel="stylesheet" href="foldgutter.min.css">
+<script src="foldcode.min.js"></script>
+<script src="foldgutter.min.js"></script>
+<script src="ident-fold.min.js"></script>
+
 <!-- TASM mode -->
 <script src="tasm.js"></script>
 
@@ -282,12 +288,55 @@ END start
   const mainEl = document.querySelector('main');
   const overlay = document.getElementById('loadingOverlay');
 
+  /* ===== TASM PROC folding (CodeMirror rangeFinder) ===== */
+  function _escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  // Fold only TASM procedures:
+  //   - "Proc name" ... "endp"
+  //   - "name proc" ... "endp"
+  CodeMirror.fold.tasmProc = function(cm, start) {
+    const lineText = cm.getLine(start.line);
+
+    const m =
+      lineText.match(/^\s*proc\s+([A-Za-z_.$?][\w.$?]*)\b/i) ||
+      lineText.match(/^\s*([A-Za-z_.$?][\w.$?]*)\s+proc\b/i);
+
+    if (!m) return;
+
+    const name = m[1];
+    const nameRe = _escRe(name);
+    const endRe = new RegExp(
+      "^\\s*(?:endp\\b|" + nameRe + "\\s+endp\\b|endp\\s+" + nameRe + "\\b)",
+      "i"
+    );
+
+    for (let i = start.line + 1, last = cm.lastLine(); i <= last; i++) {
+      if (endRe.test(cm.getLine(i))) {
+        // Fold everything after the PROC line up to (but not including) the ENDP line
+        return {
+          from: CodeMirror.Pos(start.line, lineText.length),
+          to: CodeMirror.Pos(i, 0)
+        };
+      }
+    }
+  };
+
   /* ===== CodeMirror ===== */
   const cm = CodeMirror.fromTextArea(document.getElementById('editorTA'), {
     lineNumbers: true,
     mode: 'tasm',
     indentUnit: 2,
-    tabSize: 2
+    tabSize: 2,
+
+    /* Folding UI (gutter markers + click to fold) */
+    gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
+    foldGutter: { rangeFinder: CodeMirror.fold.tasmProc },
+    foldOptions: { rangeFinder: CodeMirror.fold.tasmProc },
+
+    /* Keyboard: Ctrl+Q toggles fold at cursor line */
+    extraKeys: {
+      "Ctrl-Q": (cm) => cm.foldCode(cm.getCursor(), { rangeFinder: CodeMirror.fold.tasmProc })
+    }
   });
 
   const recentSel = document.getElementById('recentSel');
