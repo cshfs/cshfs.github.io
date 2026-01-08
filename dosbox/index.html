@@ -19,6 +19,11 @@
 <script src="foldgutter.min.js"></script>
 <script src="ident-fold.min.js"></script>
 
+<!-- CodeMirror autocomplete (ANY-WORD) -->
+<link rel="stylesheet" href="show-hint.css">
+<script src="show-hint.js"></script>
+<script src="anyword-hint.js"></script>
+
 <!-- TASM mode -->
 <script src="tasm.js"></script>
 
@@ -110,6 +115,19 @@
   .cm-locked .CodeMirror{ opacity:.5; pointer-events:none; }
   .CodeMirror-gutters{ border-right:2px solid #000; }
   .cm-s-default, .CodeMirror, .CodeMirror-scroll, .CodeMirror-gutters{ background:#fff !important; color:#000; }
+
+  /* Autocomplete popup styling (optional: keep simple and readable) */
+  .CodeMirror-hints{
+    border:2px solid #000;
+    border-radius:0;
+    box-shadow:none;
+    font-family:inherit;
+    font-size:12px;
+  }
+  .CodeMirror-hint-active{
+    background:#eee;
+    color:#000;
+  }
 
   /* Emulator hidden until Start */
   #emuSection{ display:none; }
@@ -336,9 +354,25 @@ END start
     foldGutter: { rangeFinder: CodeMirror.fold.tasmProc },
     foldOptions: { rangeFinder: CodeMirror.fold.tasmProc },
 
-    /* Keyboard: Ctrl+Q toggles fold at cursor line */
+    /* Autocomplete options (any word in document) */
+    hintOptions: { hint: CodeMirror.hint.anyword },
+
+    /* Keyboard: Ctrl+Q toggles fold at cursor line, Ctrl+Space triggers autocomplete */
     extraKeys: {
-      "Ctrl-Q": (cm) => cm.foldCode(cm.getCursor(), { rangeFinder: CodeMirror.fold.tasmProc })
+      "Ctrl-Q": (cm) => cm.foldCode(cm.getCursor(), { rangeFinder: CodeMirror.fold.tasmProc }),
+      "Ctrl-Space": (cm) => cm.showHint({ hint: CodeMirror.hint.anyword, completeSingle: false })
+    }
+  });
+
+  /* Optional: auto-popup autocomplete while typing letters/numbers/_/.$? */
+  cm.on("inputRead", (cm, change) => {
+    // avoid recursion/annoyance when hinting itself changes text
+    if (change.origin === "complete") return;
+
+    const s = (change.text && change.text[0]) ? change.text[0] : "";
+    // Trigger only on identifier-like characters (fits your asm tokens too)
+    if (s && /[A-Za-z0-9_.$?]/.test(s)) {
+      cm.showHint({ hint: CodeMirror.hint.anyword, completeSingle: false });
     }
   });
 
