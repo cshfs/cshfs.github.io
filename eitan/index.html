@@ -171,15 +171,15 @@
                     { x: 650, y: groundY, w: 300, h: 200 },
                     { x: 1100, y: groundY - 100, w: 150, h: 20 }, // פלטפורמה מרחפת
                     { x: 1400, y: groundY, w: 400, h: 200 },
-                    { x: 1900, y: groundY - 150, w: 100, h: 20 },
-                    { x: 2100, y: groundY - 250, w: 100, h: 20 },
+                    { x: 1900, y: groundY - 120, w: 100, h: 20 }, // הונמך!
+                    { x: 2100, y: groundY - 220, w: 100, h: 20 }, // הונמך בהתאמה!
                     { x: 2300, y: groundY, w: 800, h: 200 }
                 ];
                 coins = [
                     { x: 450, y: groundY - 40, w: 20, h: 20, collected: false },
                     { x: 1160, y: groundY - 140, w: 20, h: 20, collected: false },
-                    { x: 1940, y: groundY - 190, w: 20, h: 20, collected: false },
-                    { x: 2140, y: groundY - 290, w: 20, h: 20, collected: false }
+                    { x: 1940, y: groundY - 160, w: 20, h: 20, collected: false }, // הונמך בהתאמה
+                    { x: 2140, y: groundY - 260, w: 20, h: 20, collected: false } // הונמך בהתאמה
                 ];
                 enemies = [
                     { x: 700, y: groundY - 40, w: 40, h: 40, vx: 3, minX: 650, maxX: 900, active: true },
@@ -467,32 +467,67 @@
             // ציור מטבעות
             for (let coin of coins) {
                 if (!coin.collected) {
+                    let squeeze = Math.abs(Math.cos(Date.now() * 0.005));
+                    ctx.save();
+                    ctx.translate(coin.x + coin.w/2, coin.y + coin.h/2);
+                    ctx.scale(squeeze, 1); // אפקט סיבוב תלת מימד
+                    
                     ctx.fillStyle = '#fbbf24'; // צהוב זהב
                     ctx.beginPath();
-                    ctx.arc(coin.x + coin.w/2, coin.y + coin.h/2, coin.w/2, 0, Math.PI * 2);
+                    ctx.arc(0, 0, coin.w/2, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.strokeStyle = '#d97706';
                     ctx.lineWidth = 2;
                     ctx.stroke();
+                    
+                    // פס פנימי למטבע 
+                    ctx.fillStyle = '#d97706';
+                    ctx.fillRect(-2, -coin.w/4, 4, coin.w/2);
+                    
+                    ctx.restore();
                 }
             }
 
-            // ציור אויבים
-            ctx.fillStyle = '#991b1b'; // אדום כהה
+            // ציור אויבים (סגנון גומבה פטריה)
             for (let enemy of enemies) {
                 if (enemy.active) {
-                    // גוף האויב
-                    ctx.fillRect(enemy.x, enemy.y, enemy.w, enemy.h);
-                    // עיניים כועסות
-                    ctx.fillStyle = 'white';
-                    ctx.fillRect(enemy.x + 5, enemy.y + 5, 10, 10);
-                    ctx.fillRect(enemy.x + 25, enemy.y + 5, 10, 10);
-                    ctx.fillStyle = 'black';
-                    // המבט משתנה לפי כיוון התנועה
-                    const pupilOffset = enemy.vx > 0 ? 4 : 0;
-                    ctx.fillRect(enemy.x + 5 + pupilOffset, enemy.y + 8, 6, 6);
-                    ctx.fillRect(enemy.x + 25 + pupilOffset, enemy.y + 8, 6, 6);
-                    ctx.fillStyle = '#991b1b'; // חזרה לצבע הגוף
+                    ctx.save();
+                    ctx.translate(enemy.x, enemy.y);
+                    
+                    let legOffset = Math.sin(Date.now() * 0.01) * 4;
+                    
+                    // רגליים שחורות בתנועה
+                    ctx.fillStyle = '#000000';
+                    ctx.beginPath();
+                    ctx.ellipse(10 - legOffset, 36, 6, 4, 0, 0, Math.PI*2);
+                    ctx.ellipse(30 + legOffset, 36, 6, 4, 0, 0, Math.PI*2);
+                    ctx.fill();
+
+                    // גוף/ראש חום
+                    ctx.fillStyle = '#8b4513';
+                    ctx.beginPath();
+                    ctx.moveTo(0, 32);
+                    ctx.quadraticCurveTo(20, -10, 40, 32);
+                    ctx.fill();
+
+                    // עיניים
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(14, 16, 4, 6);
+                    ctx.fillRect(22, 16, 4, 6);
+                    ctx.fillStyle = '#000000';
+                    const pupilOffset = enemy.vx > 0 ? 2 : 0;
+                    ctx.fillRect(14 + pupilOffset, 18, 2, 4);
+                    ctx.fillRect(22 + pupilOffset, 18, 2, 4);
+                    
+                    // גבות כועסות
+                    ctx.strokeStyle = '#000000';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(10, 14); ctx.lineTo(18, 18);
+                    ctx.moveTo(30, 14); ctx.lineTo(22, 18);
+                    ctx.stroke();
+
+                    ctx.restore();
                 }
             }
 
@@ -507,23 +542,66 @@
                 ctx.stroke();
             }
 
-            // ציור השחקן
-            ctx.fillStyle = player.color;
-            ctx.fillRect(player.x, player.y, player.w, player.h);
+            // ציור השחקן (סגנון מריו)
+            ctx.save();
+            ctx.translate(player.x + player.w/2, player.y + player.h/2);
+            if (!player.facingRight) ctx.scale(-1, 1); // הופך את הדמות שמאלה/ימינה
+            ctx.translate(-player.w/2, -player.h/2);
+
+            let moving = Math.abs(player.vx) > 0.5 && player.grounded;
+            let legOffset = moving ? Math.sin(Date.now() * 0.015) * 6 : 0;
             
-            // עיניים של השחקן
-            ctx.fillStyle = 'white';
-            ctx.fillRect(player.x + 20, player.y + 5, 10, 15);
-            ctx.fillRect(player.x + 5, player.y + 5, 10, 15);
+            // יד אחורית
+            ctx.fillStyle = '#fca5a5';
+            ctx.fillRect(4 - legOffset/2, 20, 6, 6);
+
+            // רגליים מתנפנפות (סרבל)
+            ctx.fillStyle = '#1e3a8a';
+            ctx.fillRect(10 - legOffset, 30, 8, 8);
+            ctx.fillRect(22 + legOffset, 30, 8, 8);
+
+            // נעליים
+            ctx.fillStyle = '#451a03';
+            ctx.fillRect(6 - legOffset, 36, 12, 6);
+            ctx.fillRect(18 + legOffset, 36, 12, 6);
+
+            // חולצה אדומה (גוף)
+            ctx.fillStyle = '#ef4444';
+            ctx.fillRect(8, 16, 24, 14);
+            
+            // סרבל קדמי כחול
+            ctx.fillStyle = '#2563eb';
+            ctx.fillRect(12, 22, 16, 10);
+            
+            // כפתורי סרבל צהובים
+            ctx.fillStyle = '#fde047';
+            ctx.fillRect(12, 22, 4, 4);
+            ctx.fillRect(24, 22, 4, 4);
+
+            // יד קדמית
+            ctx.fillStyle = '#fca5a5';
+            ctx.fillRect(30 + legOffset/2, 20, 6, 6);
+
+            // ראש (צבע גוף)
+            ctx.fillStyle = '#fca5a5'; 
+            ctx.fillRect(10, 6, 20, 14);
+            
+            // אף
+            ctx.fillRect(26, 12, 6, 4);
+            
+            // עין
             ctx.fillStyle = 'black';
+            ctx.fillRect(22, 8, 4, 6); 
             
-            // כיוון המבט של השחקן
-            let pupilX = 5;
-            if (keys.right || player.vx > 1) pupilX = 10;
-            else if (keys.left || player.vx < -1) pupilX = 0;
+            // שפם
+            ctx.fillRect(24, 14, 10, 4);
             
-            ctx.fillRect(player.x + 20 + pupilX/2, player.y + 10, 5, 8);
-            ctx.fillRect(player.x + 5 + pupilX/2, player.y + 10, 5, 8);
+            // כובע אדום עם מצחיה
+            ctx.fillStyle = '#ef4444';
+            ctx.fillRect(8, 0, 22, 8);
+            ctx.fillRect(16, 0, 20, 4);
+
+            ctx.restore();
 
             // סיום הטרנספורמציה של המצלמה
             ctx.restore();
