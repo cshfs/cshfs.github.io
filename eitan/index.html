@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>משחק קפיצות - סופר פלטפורמה</title>
+    <!-- שימוש ב-Tailwind CSS לעיצוב הממשק מעל הקנבס -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* צבע שמיים בסיסי */
+            touch-action: none; /* מונע גלילה מקרית בטלפון */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* מאפשר לחיצות לעבור לקנבס אם צריך */
+        }
+        .pointer-events-auto {
+            pointer-events: auto;
+        }
+        .text-shadow {
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- שכבת ממשק משתמש (UI) -->
+    <div id="ui-layer" class="flex flex-col justify-between p-4 sm:p-6">
+        
+        <!-- עליון: ניקוד והודעות -->
+        <div class="flex justify-between items-start w-full pointer-events-auto">
+            <div class="text-white text-3xl font-bold text-shadow">
+                ניקוד: <span id="scoreDisplay">0</span>
+            </div>
+            
+            <div class="flex flex-col items-end gap-4">
+                <div id="messageBox" class="hidden flex flex-col items-center bg-white/90 px-8 py-6 rounded-2xl shadow-2xl backdrop-blur-sm border-4 border-gray-200">
+                    <h1 id="messageText" class="text-4xl sm:text-5xl font-extrabold text-red-500 mb-4">פסלת!</h1>
+                    <button id="restartBtn" class="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white px-8 py-3 rounded-xl font-bold text-xl shadow-lg transition-transform transform hover:scale-105">
+                        התחל מחדש
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- תחתון: כפתורי שליטה למובייל (מוסתרים במסכים גדולים) -->
+        <div class="flex justify-between items-end pb-4 sm:hidden pointer-events-auto opacity-70">
+            <div class="flex gap-4">
+                <button id="btnLeft" class="bg-gray-800 text-white w-20 h-20 rounded-full text-4xl font-bold flex justify-center items-center shadow-lg active:bg-gray-600 select-none">◄</button>
+                <button id="btnRight" class="bg-gray-800 text-white w-20 h-20 rounded-full text-4xl font-bold flex justify-center items-center shadow-lg active:bg-gray-600 select-none">►</button>
+            </div>
+            <div class="flex gap-4">
+                <button id="btnShoot" class="bg-red-500 text-white w-20 h-20 rounded-full text-3xl font-bold flex justify-center items-center shadow-lg active:bg-red-400 select-none">🎯</button>
+                <button id="btnJump" class="bg-blue-600 text-white w-20 h-20 rounded-full text-4xl font-bold flex justify-center items-center shadow-lg active:bg-blue-400 select-none">▲</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- אזור הציור של המשחק -->
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+        const restartBtn = document.getElementById('restartBtn');
+
+        // התאמת הקנבס לגודל החלון
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- הגדרות המשחק ---
+        const GRAVITY = 0.6;
+        const TERMINAL_VELOCITY = 15;
+        
+        let gameState = 'playing'; // 'playing', 'gameover', 'won'
+        let score = 0;
+        let cameraX = 0;
+        let animationFrameId;
+
+        // מקשים
+        const keys = {
+            left: false,
+            right: false,
+            up: false
+        };
+
+        // --- אובייקטים של המשחק ---
+        let player, platforms, coins, enemies, finishLine;
+        let bullets = [];
+        let lastShotTime = 0;
+
+        function initGame() {
+            gameState = 'playing';
+            score = 0;
+            scoreDisplay.innerText = score;
+            messageBox.classList.add('hidden');
+            bullets = [];
+
+            // הגדרת השחקן
+            player = {
+                x: 100,
+                y: 100,
+                w: 40,
+                h: 40,
+                vx: 0,
+                vy: 0,
+                speed: 6,
+                jumpPower: -13,
+                grounded: false,
+                facingRight: true,
+                color: '#ef4444' // אדום בסגנון מריו
+            };
+
+            // יצירת השלב (פלטפורמות)
+            const groundY = canvas.height - 100 > 500 ? canvas.height - 100 : 500; // רצפה בסיסית
+            
+            platforms = [
+                { x: 0, y: groundY, w: 1000, h: 200 }, // רצפה התחלתית
+                { x: 400, y: groundY - 120, w: 150, h: 20 }, // מדרגה ראשונה
+                { x: 700, y: groundY - 220, w: 150, h: 20 }, // מדרגה שנייה
+                { x: 1200, y: groundY, w: 800, h: 200 }, // אחרי תהום ראשונה
+                { x: 1400, y: groundY - 150, w: 100, h: 20 },
+                { x: 1600, y: groundY - 250, w: 100, h: 20 },
+                { x: 1800, y: groundY - 350, w: 100, h: 20 },
+                { x: 2200, y: groundY, w: 1200, h: 200 }, // אזור הסיום
+                { x: 2500, y: groundY - 100, w: 200, h: 100 }, // מכשול קטן לפני הסוף
+            ];
+
+            // יצירת מטבעות לאיסוף
+            coins = [
+                { x: 460, y: groundY - 160, w: 20, h: 20, collected: false },
+                { x: 760, y: groundY - 260, w: 20, h: 20, collected: false },
+                { x: 950, y: groundY - 40, w: 20, h: 20, collected: false }, // על קצה הצוק
+                { x: 1440, y: groundY - 190, w: 20, h: 20, collected: false },
+                { x: 1640, y: groundY - 290, w: 20, h: 20, collected: false },
+                { x: 1840, y: groundY - 390, w: 20, h: 20, collected: false },
+                { x: 2550, y: groundY - 140, w: 20, h: 20, collected: false },
+                { x: 2600, y: groundY - 140, w: 20, h: 20, collected: false },
+            ];
+
+            // יצירת אויבים (פטריות/צבים רעים)
+            enemies = [
+                { x: 700, y: groundY - 40, w: 40, h: 40, vx: 2, minX: 600, maxX: 950, active: true },
+                { x: 1500, y: groundY - 40, w: 40, h: 40, vx: 2.5, minX: 1200, maxX: 1950, active: true },
+                { x: 2300, y: groundY - 40, w: 40, h: 40, vx: 3, minX: 2200, maxX: 2450, active: true }
+            ];
+
+            // דגל סיום השלב
+            finishLine = {
+                x: 3100,
+                y: groundY - 300,
+                w: 10,
+                h: 300,
+                flagY: groundY - 280
+            };
+
+            cameraX = 0;
+            update(); // התחלת לולאת המשחק
+        }
+
+        // --- בדיקת התנגשות בין שני מלבנים ---
+        function checkCollision(r1, r2) {
+            return r1.x < r2.x + r2.w &&
+                   r1.x + r1.w > r2.x &&
+                   r1.y < r2.y + r2.h &&
+                   r1.y + r1.h > r2.y;
+        }
+
+        // --- ירייה ---
+        function shoot() {
+            if (gameState !== 'playing') return;
+            const now = Date.now();
+            if (now - lastShotTime < 300) return; // השהיה בין יריות
+            lastShotTime = now;
+
+            bullets.push({
+                x: player.facingRight ? player.x + player.w : player.x - 10,
+                y: player.y + player.h / 2 - 5,
+                w: 10,
+                h: 10,
+                vx: player.facingRight ? 12 : -12
+            });
+        }
+
+        // --- עדכון הפיזיקה וההיגיון של המשחק ---
+        function gameLogic() {
+            if (gameState !== 'playing') return;
+
+            // תנועה אופקית (X)
+            if (keys.left) {
+                player.vx = -player.speed;
+            } else if (keys.right) {
+                player.vx = player.speed;
+            } else {
+                player.vx *= 0.8; // חיכוך כשהשחקן לא לוחץ כלום
+            }
+
+            // החלת התנועה האופקית על השחקן
+            player.x += player.vx;
+
+            // מניעת יציאה מגבולות השלב (שמאלה)
+            if (player.x < 0) {
+                player.x = 0;
+                player.vx = 0;
+            }
+
+            // בדיקת התנגשות בציר ה-X עם פלטפורמות
+            for (let p of platforms) {
+                if (checkCollision(player, p)) {
+                    if (player.vx > 0) { // זז ימינה ונתקע בקיר
+                        player.x = p.x - player.w;
+                    } else if (player.vx < 0) { // זז שמאלה ונתקע בקיר
+                        player.x = p.x + p.w;
+                    }
+                    player.vx = 0;
+                }
+            }
+
+            // תנועה אנכית (Y) כוח משיכה
+            player.vy += GRAVITY;
+            if (player.vy > TERMINAL_VELOCITY) player.vy = TERMINAL_VELOCITY;
+            
+            player.y += player.vy;
+            player.grounded = false;
+
+            // בדיקת התנגשות בציר ה-Y עם פלטפורמות
+            for (let p of platforms) {
+                if (checkCollision(player, p)) {
+                    if (player.vy > 0) { // נופל למטה ופוגע ברצפה
+                        player.y = p.y - player.h;
+                        player.vy = 0;
+                        player.grounded = true;
+                    } else if (player.vy < 0) { // קופץ למעלה ופוגע בתקרה
+                        player.y = p.y + p.h;
+                        player.vy = 0;
+                    }
+                }
+            }
+
+            // עדכון אויבים
+            for (let enemy of enemies) {
+                if (!enemy.active) continue;
+                
+                // תנועת האויב
+                enemy.x += enemy.vx;
+                if (enemy.x > enemy.maxX || enemy.x < enemy.minX) {
+                    enemy.vx *= -1; // החלפת כיוון
+                }
+
+                // התנגשות עם אויב
+                if (checkCollision(player, enemy)) {
+                    // בדיקה אם השחקן קופץ על האויב מלמעלה
+                    if (player.vy > 0 && player.y + player.h - player.vy <= enemy.y + 15) {
+                        enemy.active = false; // האויב הובס
+                        player.vy = player.jumpPower * 0.8; // קפיצה קטנה לאחר מעיכת אויב
+                        score += 50;
+                        scoreDisplay.innerText = score;
+                    } else {
+                        // השחקן נפגע - נפסל
+                        gameOver(false);
+                    }
+                }
+            }
+
+            // איסוף מטבעות
+            for (let coin of coins) {
+                if (!coin.collected && checkCollision(player, coin)) {
+                    coin.collected = true;
+                    score += 10;
+                    scoreDisplay.innerText = score;
+                }
+            }
+
+            // עדכון יריות
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                let b = bullets[i];
+                b.x += b.vx;
+
+                // הסרת ירייה אם יצאה מהמסך
+                if (b.x < cameraX - 100 || b.x > cameraX + canvas.width + 100) {
+                    bullets.splice(i, 1);
+                    continue;
+                }
+
+                // פגיעה בפלטפורמה
+                let hitPlatform = false;
+                for (let p of platforms) {
+                    if (checkCollision(b, p)) {
+                        hitPlatform = true;
+                        break;
+                    }
+                }
+                if (hitPlatform) {
+                    bullets.splice(i, 1);
+                    continue;
+                }
+
+                // פגיעה באויב
+                let hitEnemy = false;
+                for (let enemy of enemies) {
+                    if (enemy.active && checkCollision(b, enemy)) {
+                        enemy.active = false;
+                        hitEnemy = true;
+                        score += 50;
+                        scoreDisplay.innerText = score;
+                        break;
+                    }
+                }
+                if (hitEnemy) {
+                    bullets.splice(i, 1);
+                }
+            }
+
+            // הגעה לסיום (דגל)
+            if (player.x + player.w > finishLine.x) {
+                gameOver(true);
+            }
+
+            // נפילה לתהום (נפסל)
+            if (player.y > canvas.height + 200) {
+                gameOver(false);
+            }
+
+            // עדכון מצלמה - עוקבת אחרי השחקן
+            let targetCameraX = player.x - canvas.width / 3;
+            if (targetCameraX < 0) targetCameraX = 0;
+            cameraX += (targetCameraX - cameraX) * 0.1; // תנועת מצלמה חלקה
+        }
+
+        // --- ציור כל האלמנטים על המסך ---
+        function draw() {
+            // ניקוי המסך ושמיים
+            ctx.fillStyle = '#87CEEB';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(-Math.floor(cameraX), 0); // הזזת עולם המשחק שמאלה כדי ליצור אפקט גלילה
+
+            // ציור עננים ונוף (רקע)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.beginPath();
+            ctx.arc(300, 150, 40, 0, Math.PI * 2);
+            ctx.arc(350, 150, 50, 0, Math.PI * 2);
+            ctx.arc(400, 150, 40, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(1200, 100, 40, 0, Math.PI * 2);
+            ctx.arc(1250, 100, 60, 0, Math.PI * 2);
+            ctx.arc(1320, 100, 40, 0, Math.PI * 2);
+            ctx.fill();
+
+            // ציור דגל סיום
+            ctx.fillStyle = '#A0AEC0'; // תורן הדגל
+            ctx.fillRect(finishLine.x, finishLine.y, finishLine.w, finishLine.h);
+            ctx.fillStyle = '#48BB78'; // דגל ירוק
+            
+            // הורדת הדגל אם השחקן ניצח
+            let flagDrawY = finishLine.flagY;
+            if (gameState === 'won') {
+                flagDrawY = finishLine.y + finishLine.h - 40;
+            }
+            ctx.beginPath();
+            ctx.moveTo(finishLine.x + finishLine.w, flagDrawY);
+            ctx.lineTo(finishLine.x + 80, flagDrawY + 20);
+            ctx.lineTo(finishLine.x + finishLine.w, flagDrawY + 40);
+            ctx.fill();
+
+            // ציור פלטפורמות (אדמה)
+            ctx.fillStyle = '#4ade80'; // ירוק דשא
+            for (let p of platforms) {
+                // דשא למעלה
+                ctx.fillRect(p.x, p.y, p.w, 15);
+                // אדמה חומה למטה
+                ctx.fillStyle = '#a16207'; 
+                ctx.fillRect(p.x, p.y + 15, p.w, p.h - 15);
+                ctx.fillStyle = '#4ade80'; // חזרה לדשא
+                
+                // מסגרת לפלטפורמות באוויר
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(p.x, p.y, p.w, p.h);
+            }
+
+            // ציור מטבעות
+            for (let coin of coins) {
+                if (!coin.collected) {
+                    ctx.fillStyle = '#fbbf24'; // צהוב זהב
+                    ctx.beginPath();
+                    ctx.arc(coin.x + coin.w/2, coin.y + coin.h/2, coin.w/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#d97706';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            }
+
+            // ציור אויבים
+            ctx.fillStyle = '#991b1b'; // אדום כהה
+            for (let enemy of enemies) {
+                if (enemy.active) {
+                    // גוף האויב
+                    ctx.fillRect(enemy.x, enemy.y, enemy.w, enemy.h);
+                    // עיניים כועסות
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(enemy.x + 5, enemy.y + 5, 10, 10);
+                    ctx.fillRect(enemy.x + 25, enemy.y + 5, 10, 10);
+                    ctx.fillStyle = 'black';
+                    // המבט משתנה לפי כיוון התנועה
+                    const pupilOffset = enemy.vx > 0 ? 4 : 0;
+                    ctx.fillRect(enemy.x + 5 + pupilOffset, enemy.y + 8, 6, 6);
+                    ctx.fillRect(enemy.x + 25 + pupilOffset, enemy.y + 8, 6, 6);
+                    ctx.fillStyle = '#991b1b'; // חזרה לצבע הגוף
+                }
+            }
+
+            // ציור יריות
+            ctx.fillStyle = '#f97316'; // כתום לאש
+            for (let b of bullets) {
+                ctx.beginPath();
+                ctx.arc(b.x + b.w/2, b.y + b.h/2, b.w/2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#ea580c';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            // ציור השחקן
+            ctx.fillStyle = player.color;
+            ctx.fillRect(player.x, player.y, player.w, player.h);
+            
+            // עיניים של השחקן
+            ctx.fillStyle = 'white';
+            ctx.fillRect(player.x + 20, player.y + 5, 10, 15);
+            ctx.fillRect(player.x + 5, player.y + 5, 10, 15);
+            ctx.fillStyle = 'black';
+            
+            // כיוון המבט של השחקן
+            let pupilX = 5;
+            if (keys.right || player.vx > 1) pupilX = 10;
+            else if (keys.left || player.vx < -1) pupilX = 0;
+            
+            ctx.fillRect(player.x + 20 + pupilX/2, player.y + 10, 5, 8);
+            ctx.fillRect(player.x + 5 + pupilX/2, player.y + 10, 5, 8);
+
+            // סיום הטרנספורמציה של המצלמה
+            ctx.restore();
+        }
+
+        // --- סיום המשחק (נצחון או הפסד) ---
+        function gameOver(win) {
+            gameState = win ? 'won' : 'gameover';
+            messageBox.classList.remove('hidden');
+            
+            if (win) {
+                messageText.innerText = "ניצחת! כל הכבוד!";
+                messageText.className = "text-4xl sm:text-5xl font-extrabold text-green-500 mb-4";
+                score += 100; // בונוס סיום
+                scoreDisplay.innerText = score;
+            } else {
+                messageText.innerText = "פסלת!";
+                messageText.className = "text-4xl sm:text-5xl font-extrabold text-red-500 mb-4";
+            }
+        }
+
+        // --- לולאת המשחק המרכזית ---
+        function update() {
+            gameLogic();
+            draw();
+            
+            // ממשיך לקרוא לעדכונים כל עוד המשחק רץ או שאנחנו רוצים לצייר את מסך הסיום
+            animationFrameId = requestAnimationFrame(update);
+        }
+
+        // --- אירועי מקלדת ---
+        window.addEventListener('keydown', (e) => {
+            if (gameState !== 'playing') return;
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') { keys.left = true; player.facingRight = false; }
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') { keys.right = true; player.facingRight = true; }
+            if ((e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') && !keys.up) {
+                keys.up = true;
+                if (player.grounded) {
+                    player.vy = player.jumpPower;
+                    player.grounded = false;
+                }
+            }
+            if (e.code === 'KeyZ' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+                shoot();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
+            if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
+                keys.up = false;
+                // קפיצה נמוכה אם עוזבים את המקש מוקדם
+                if (player.vy < 0) {
+                    player.vy *= 0.5;
+                }
+            }
+        });
+
+        // --- אירועי מגע (למובייל) ---
+        const btnLeft = document.getElementById('btnLeft');
+        const btnRight = document.getElementById('btnRight');
+        const btnJump = document.getElementById('btnJump');
+        const btnShoot = document.getElementById('btnShoot');
+
+        function setupTouch(btn, keyName) {
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault(); // מונע התנהגות דפדפן רגילה (כמו זום)
+                if (gameState !== 'playing') return;
+                
+                if (keyName === 'left') player.facingRight = false;
+                if (keyName === 'right') player.facingRight = true;
+
+                if (keyName === 'up') {
+                    if (!keys.up && player.grounded) {
+                        player.vy = player.jumpPower;
+                        player.grounded = false;
+                    }
+                    keys.up = true;
+                } else {
+                    keys[keyName] = true;
+                }
+            });
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                keys[keyName] = false;
+                if (keyName === 'up' && player.vy < 0) {
+                    player.vy *= 0.5;
+                }
+            });
+        }
+
+        setupTouch(btnLeft, 'left');
+        setupTouch(btnRight, 'right');
+        setupTouch(btnJump, 'up');
+
+        if (btnShoot) {
+            btnShoot.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                shoot();
+            });
+        }
+
+        // כפתור התחלה מחדש
+        restartBtn.addEventListener('click', () => {
+            cancelAnimationFrame(animationFrameId);
+            initGame();
+        });
+
+        // הפעלת המשחק בפעם הראשונה
+        initGame();
+
+    </script>
+</body>
+</html>
