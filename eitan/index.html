@@ -86,6 +86,127 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
+        // --- מערכת סאונד מובנית (Web Audio API) ---
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioContext();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
+
+            if (type === 'jump') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'doubleJump') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(800, now + 0.15);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            } else if (type === 'coin') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.setValueAtTime(1200, now + 0.05);
+                gainNode.gain.setValueAtTime(0.1, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'shoot') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.exponentialRampToValueAtTime(100, now + 0.1);
+                gainNode.gain.setValueAtTime(0.2, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'stomp') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
+                gainNode.gain.setValueAtTime(0.2, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            } else if (type === 'die') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(200, now);
+                osc.frequency.exponentialRampToValueAtTime(50, now + 0.5);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                osc.start(now);
+                osc.stop(now + 0.5);
+            } else if (type === 'win') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(400, now);
+                osc.frequency.setValueAtTime(500, now + 0.1);
+                osc.frequency.setValueAtTime(600, now + 0.2);
+                osc.frequency.setValueAtTime(800, now + 0.3);
+                gainNode.gain.setValueAtTime(0.2, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+                osc.start(now);
+                osc.stop(now + 0.6);
+            }
+        }
+
+        // --- מערכת חלקיקים (אפקטים) ---
+        let particles = [];
+        let screenShake = 0;
+
+        function createParticles(x, y, color, count, speedModifier = 1) {
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 6 * speedModifier,
+                    vy: (Math.random() - 0.5) * 6 * speedModifier,
+                    life: 1.0,
+                    color: color,
+                    size: Math.random() * 4 + 2
+                });
+            }
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.03; // קצב ההעלמות
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        function drawParticles() {
+            for (let p of particles) {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x, p.y, p.size, p.size);
+            }
+            ctx.globalAlpha = 1.0;
+        }
+
         // --- הגדרות המשחק ---
         const GRAVITY = 0.6;
         const TERMINAL_VELOCITY = 15;
@@ -116,6 +237,8 @@
             gameState = 'playing';
             messageBox.classList.add('hidden');
             bullets = [];
+            particles = [];
+            screenShake = 0;
 
             // הגדרת השחקן
             player = {
@@ -129,7 +252,9 @@
                 jumpPower: -13,
                 grounded: false,
                 facingRight: true,
-                color: '#ef4444' // אדום בסגנון מריו
+                color: '#ef4444', // אדום בסגנון מריו
+                currentJumps: 0, // לקפיצה כפולה
+                maxJumps: 2      // לקפיצה כפולה
             };
 
             const groundY = 500; // רצפה בסיסית וקבועה
@@ -158,9 +283,9 @@
                     { x: 2600, y: groundY - 140, w: 20, h: 20, collected: false },
                 ];
                 enemies = [
-                    { x: 700, y: groundY - 40, w: 40, h: 40, vx: 2, minX: 600, maxX: 950, active: true },
-                    { x: 1500, y: groundY - 40, w: 40, h: 40, vx: 2.5, minX: 1200, maxX: 1950, active: true },
-                    { x: 2300, y: groundY - 40, w: 40, h: 40, vx: 3, minX: 2200, maxX: 2450, active: true }
+                    { x: 700, y: groundY - 40, w: 40, h: 40, vx: 2, minX: 600, maxX: 950, active: true, type: 'walker' },
+                    { x: 1500, y: groundY - 40, w: 40, h: 40, vx: 2.5, minX: 1200, maxX: 1950, active: true, type: 'walker' },
+                    { x: 2300, y: groundY - 40, w: 40, h: 40, vx: 3, minX: 2200, maxX: 2450, active: true, type: 'walker' }
                 ];
                 finishLine = { x: 3100, y: groundY - 300, w: 10, h: 300, flagY: groundY - 280 };
             } 
@@ -169,22 +294,22 @@
                 platforms = [
                     { x: 0, y: groundY, w: 500, h: 200 },
                     { x: 650, y: groundY, w: 300, h: 200 },
-                    { x: 1100, y: groundY - 100, w: 150, h: 20 }, // פלטפורמה מרחפת
+                    { x: 1100, y: groundY - 100, w: 150, h: 20 },
                     { x: 1400, y: groundY, w: 400, h: 200 },
-                    { x: 1900, y: groundY - 120, w: 100, h: 20 }, // הונמך!
-                    { x: 2100, y: groundY - 220, w: 100, h: 20 }, // הונמך בהתאמה!
+                    { x: 1900, y: groundY - 120, w: 100, h: 20 },
+                    { x: 2100, y: groundY - 220, w: 100, h: 20 },
                     { x: 2300, y: groundY, w: 800, h: 200 }
                 ];
                 coins = [
                     { x: 450, y: groundY - 40, w: 20, h: 20, collected: false },
                     { x: 1160, y: groundY - 140, w: 20, h: 20, collected: false },
-                    { x: 1940, y: groundY - 160, w: 20, h: 20, collected: false }, // הונמך בהתאמה
-                    { x: 2140, y: groundY - 260, w: 20, h: 20, collected: false } // הונמך בהתאמה
+                    { x: 1940, y: groundY - 160, w: 20, h: 20, collected: false },
+                    { x: 2140, y: groundY - 260, w: 20, h: 20, collected: false }
                 ];
                 enemies = [
-                    { x: 700, y: groundY - 40, w: 40, h: 40, vx: 3, minX: 650, maxX: 900, active: true },
-                    { x: 1500, y: groundY - 40, w: 40, h: 40, vx: 4, minX: 1400, maxX: 1750, active: true },
-                    { x: 2500, y: groundY - 40, w: 40, h: 40, vx: 4, minX: 2300, maxX: 2900, active: true }
+                    { x: 700, y: groundY - 40, w: 40, h: 40, vx: 3, minX: 650, maxX: 900, active: true, type: 'walker' },
+                    { x: 1500, y: groundY - 40, w: 40, h: 40, vx: 4, minX: 1400, maxX: 1750, active: true, type: 'walker' },
+                    { x: 2500, y: groundY - 40, w: 40, h: 40, vx: 4, minX: 2300, maxX: 2900, active: true, type: 'walker' }
                 ];
                 finishLine = { x: 2950, y: groundY - 300, w: 10, h: 300, flagY: groundY - 280 };
             }
@@ -211,11 +336,94 @@
                     { x: 2415, y: groundY - 190, w: 20, h: 20, collected: false }
                 ];
                 enemies = [
-                    { x: 1200, y: groundY - 40, w: 40, h: 40, vx: 2, minX: 1100, maxX: 1350, active: true },
-                    { x: 1550, y: groundY - 140, w: 40, h: 40, vx: 3, minX: 1500, maxX: 1650, active: true },
-                    { x: 2800, y: groundY - 40, w: 40, h: 40, vx: 5, minX: 2600, maxX: 3100, active: true } // אויב מהיר מאד
+                    { x: 1200, y: groundY - 40, w: 40, h: 40, vx: 2, minX: 1100, maxX: 1350, active: true, type: 'walker' },
+                    { x: 1550, y: groundY - 140, w: 40, h: 40, vx: 3, minX: 1500, maxX: 1650, active: true, type: 'walker' },
+                    { x: 2800, y: groundY - 40, w: 40, h: 40, vx: 5, minX: 2600, maxX: 3100, active: true, type: 'walker' }
                 ];
                 finishLine = { x: 3050, y: groundY - 300, w: 10, h: 300, flagY: groundY - 280 };
+            }
+            else if (levelNum === 4) {
+                // --- שלב 4: תהומות ענקיים! חייבים קפיצה כפולה ---
+                platforms = [
+                    { x: 0, y: groundY, w: 400, h: 200 },
+                    { x: 800, y: groundY, w: 200, h: 200 }, // תהום של 400! דורש קפיצה כפולה
+                    { x: 1400, y: groundY - 50, w: 150, h: 200 },
+                    { x: 2000, y: groundY - 100, w: 100, h: 200 },
+                    { x: 2500, y: groundY - 200, w: 80, h: 20 },
+                    { x: 2900, y: groundY, w: 600, h: 200 }
+                ];
+                coins = [
+                    { x: 600, y: groundY - 100, w: 20, h: 20, collected: false }, // מטבע באוויר מעל התהום
+                    { x: 1150, y: groundY - 100, w: 20, h: 20, collected: false },
+                    { x: 1750, y: groundY - 150, w: 20, h: 20, collected: false },
+                    { x: 2250, y: groundY - 200, w: 20, h: 20, collected: false },
+                    { x: 2530, y: groundY - 240, w: 20, h: 20, collected: false }
+                ];
+                enemies = [
+                    { x: 850, y: groundY - 40, w: 40, h: 40, vx: 2, minX: 800, maxX: 950, active: true, type: 'walker' },
+                    { x: 1450, y: groundY - 90, w: 40, h: 40, vx: 2, minX: 1400, maxX: 1500, active: true, type: 'walker' },
+                    { x: 3000, y: groundY - 40, w: 40, h: 40, vx: 4, minX: 2900, maxX: 3400, active: true, type: 'walker' }
+                ];
+                finishLine = { x: 3350, y: groundY - 300, w: 10, h: 300, flagY: groundY - 280 };
+            }
+            else if (levelNum === 5) {
+                // --- שלב 5: אויבים מרחפים ופלטפורמות צפופות ---
+                platforms = [
+                    { x: 0, y: groundY, w: 300, h: 200 },
+                    { x: 500, y: groundY, w: 250, h: 200 },
+                    { x: 900, y: groundY, w: 250, h: 200 },
+                    { x: 1300, y: groundY, w: 250, h: 200 },
+                    { x: 1700, y: groundY, w: 800, h: 200 }
+                ];
+                coins = [
+                    { x: 400, y: groundY - 50, w: 20, h: 20, collected: false },
+                    { x: 800, y: groundY - 50, w: 20, h: 20, collected: false },
+                    { x: 1200, y: groundY - 50, w: 20, h: 20, collected: false },
+                    { x: 1900, y: groundY - 100, w: 20, h: 20, collected: false },
+                    { x: 2100, y: groundY - 100, w: 20, h: 20, collected: false }
+                ];
+                enemies = [
+                    // אויבים מרחפים - סוג חדש שלא מצריך שינוי גרפיקה! משתמשים באותה תמונת פטריה
+                    { x: 400, y: groundY - 150, startY: groundY - 150, w: 40, h: 40, vx: 0, active: true, type: 'flying' },
+                    { x: 800, y: groundY - 150, startY: groundY - 150, w: 40, h: 40, vx: 0, active: true, type: 'flying' },
+                    { x: 1200, y: groundY - 150, startY: groundY - 150, w: 40, h: 40, vx: 0, active: true, type: 'flying' },
+                    { x: 1800, y: groundY - 40, w: 40, h: 40, vx: 3, minX: 1700, maxX: 2400, active: true, type: 'walker' },
+                    { x: 2200, y: groundY - 40, w: 40, h: 40, vx: -4, minX: 1700, maxX: 2400, active: true, type: 'walker' }
+                ];
+                finishLine = { x: 2350, y: groundY - 300, w: 10, h: 300, flagY: groundY - 280 };
+            }
+            else if (levelNum === 6) {
+                // --- שלב 6: טיפוס קשוח במיוחד ---
+                platforms = [
+                    { x: 0, y: groundY, w: 300, h: 200 },
+                    { x: 400, y: groundY - 100, w: 100, h: 20 },
+                    { x: 600, y: groundY - 200, w: 100, h: 20 },
+                    { x: 800, y: groundY - 300, w: 100, h: 20 },
+                    { x: 1100, y: groundY - 250, w: 100, h: 20 },
+                    { x: 1400, y: groundY - 150, w: 100, h: 20 },
+                    { x: 1700, y: groundY - 50, w: 100, h: 20 },
+                    { x: 2000, y: groundY, w: 800, h: 200 },
+                    { x: 2150, y: groundY - 120, w: 80, h: 20 },
+                    { x: 2350, y: groundY - 240, w: 80, h: 20 }
+                ];
+                coins = [
+                    { x: 440, y: groundY - 140, w: 20, h: 20, collected: false },
+                    { x: 640, y: groundY - 240, w: 20, h: 20, collected: false },
+                    { x: 840, y: groundY - 340, w: 20, h: 20, collected: false },
+                    { x: 1140, y: groundY - 290, w: 20, h: 20, collected: false },
+                    { x: 2180, y: groundY - 160, w: 20, h: 20, collected: false },
+                    { x: 2380, y: groundY - 280, w: 20, h: 20, collected: false },
+                    { x: 2600, y: groundY - 100, w: 20, h: 20, collected: false },
+                    { x: 2650, y: groundY - 100, w: 20, h: 20, collected: false },
+                    { x: 2700, y: groundY - 100, w: 20, h: 20, collected: false }
+                ];
+                enemies = [
+                    { x: 950, y: groundY - 300, startY: groundY - 300, w: 40, h: 40, vx: 0, active: true, type: 'flying' },
+                    { x: 1250, y: groundY - 200, startY: groundY - 200, w: 40, h: 40, vx: 0, active: true, type: 'flying' },
+                    { x: 1550, y: groundY - 100, startY: groundY - 100, w: 40, h: 40, vx: 0, active: true, type: 'flying' },
+                    { x: 2100, y: groundY - 40, w: 40, h: 40, vx: 5, minX: 2000, maxX: 2750, active: true, type: 'walker' }
+                ];
+                finishLine = { x: 2650, y: groundY - 300, w: 10, h: 300, flagY: groundY - 280 };
             }
 
             cameraX = 0;
@@ -249,6 +457,7 @@
                 h: 10,
                 vx: player.facingRight ? 12 : -12
             });
+            playSound('shoot');
         }
 
         // --- עדכון הפיזיקה וההיגיון של המשחק ---
@@ -299,6 +508,7 @@
                         player.y = p.y - player.h;
                         player.vy = 0;
                         player.grounded = true;
+                        player.currentJumps = 0; // איפוס קפיצה כפולה
                     } else if (player.vy < 0) { // קופץ למעלה ופוגע בתקרה
                         player.y = p.y + p.h;
                         player.vy = 0;
@@ -310,10 +520,15 @@
             for (let enemy of enemies) {
                 if (!enemy.active) continue;
                 
-                // תנועת האויב
-                enemy.x += enemy.vx;
-                if (enemy.x > enemy.maxX || enemy.x < enemy.minX) {
-                    enemy.vx *= -1; // החלפת כיוון
+                // תנועת האויב בהתאם לסוג
+                if (enemy.type === 'walker') {
+                    enemy.x += enemy.vx;
+                    if (enemy.x > enemy.maxX || enemy.x < enemy.minX) {
+                        enemy.vx *= -1; // החלפת כיוון
+                    }
+                } else if (enemy.type === 'flying') {
+                    // אויב מעופף משתמש בגלים לנוע למעלה ולמטה
+                    enemy.y = enemy.startY + Math.sin(Date.now() * 0.003 + enemy.x) * 50;
                 }
 
                 // התנגשות עם אויב
@@ -324,6 +539,8 @@
                         player.vy = player.jumpPower * 0.8; // קפיצה קטנה לאחר מעיכת אויב
                         score += 50;
                         scoreDisplay.innerText = score;
+                        playSound('stomp');
+                        createParticles(enemy.x + enemy.w/2, enemy.y + enemy.h/2, '#8b4513', 15);
                     } else {
                         // השחקן נפגע - נפסל
                         gameOver(false);
@@ -337,6 +554,8 @@
                     coin.collected = true;
                     score += 10;
                     scoreDisplay.innerText = score;
+                    playSound('coin');
+                    createParticles(coin.x + coin.w/2, coin.y + coin.h/2, '#fbbf24', 10);
                 }
             }
 
@@ -359,6 +578,7 @@
                 for (let p of platforms) {
                     if (checkCollision(b, p)) {
                         hitPlatform = true;
+                        createParticles(b.x + b.w/2, b.y + b.h/2, '#f97316', 5);
                         break;
                     }
                 }
@@ -375,6 +595,8 @@
                         hitEnemy = true;
                         score += 50;
                         scoreDisplay.innerText = score;
+                        playSound('stomp');
+                        createParticles(enemy.x + enemy.w/2, enemy.y + enemy.h/2, '#8b4513', 15);
                         break;
                     }
                 }
@@ -382,6 +604,8 @@
                     bullets.splice(i, 1);
                 }
             }
+
+            updateParticles();
 
             // הגעה לסיום (דגל)
             if (player.x + player.w > finishLine.x) {
@@ -393,7 +617,7 @@
                 gameOver(false);
             }
 
-            // עדכון מצלמה - עוקבת אחרי השחקן (תמיכה במצב אנכי)
+            // עדכון מצלמה - עוקבת אחרי השחקן
             let logicalHeight = canvas.height / zoom;
             
             let targetCameraX = player.x - logicalWidth / 3;
@@ -401,8 +625,9 @@
             cameraX += (targetCameraX - cameraX) * 0.1; 
             
             let targetCameraY = player.y - logicalHeight / 2;
-            // מגביל את המצלמה כדי שלא תרד מתחת לאדמה ותחשוף ריק
             let maxCameraY = 500 + 200 - logicalHeight;
+            // בשלבים גבוהים נאפשר למצלמה לעלות יותר
+            if (currentLevel >= 6) maxCameraY = 800;
             if (targetCameraY > maxCameraY) targetCameraY = maxCameraY;
             cameraY += (targetCameraY - cameraY) * 0.1;
         }
@@ -416,7 +641,18 @@
             ctx.save();
             let zoom = getZoom();
             ctx.scale(zoom, zoom);
-            ctx.translate(-Math.floor(cameraX), -Math.floor(cameraY)); // הזזת עולם המשחק לרוחב ולגובה
+            
+            // הוספת אפקט רעידת מסך אם קיים
+            let shakeX = 0;
+            let shakeY = 0;
+            if (screenShake > 0) {
+                shakeX = (Math.random() - 0.5) * screenShake;
+                shakeY = (Math.random() - 0.5) * screenShake;
+                screenShake *= 0.9;
+                if (screenShake < 0.5) screenShake = 0;
+            }
+            
+            ctx.translate(-Math.floor(cameraX) + shakeX, -Math.floor(cameraY) + shakeY); // הזזת עולם המשחק לרוחב ולגובה
 
             // ציור עננים ונוף (רקע)
             ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
@@ -495,6 +731,7 @@
                     ctx.translate(enemy.x, enemy.y);
                     
                     let legOffset = Math.sin(Date.now() * 0.01) * 4;
+                    if (enemy.type === 'flying') legOffset = 0; // אויב מעופף לא מזיז רגליים
                     
                     // רגליים שחורות בתנועה
                     ctx.fillStyle = '#000000';
@@ -541,67 +778,72 @@
                 ctx.lineWidth = 2;
                 ctx.stroke();
             }
+            
+            // ציור חלקיקים (האפקט החדש)
+            drawParticles();
 
             // ציור השחקן (סגנון מריו)
-            ctx.save();
-            ctx.translate(player.x + player.w/2, player.y + player.h/2);
-            if (!player.facingRight) ctx.scale(-1, 1); // הופך את הדמות שמאלה/ימינה
-            ctx.translate(-player.w/2, -player.h/2);
+            if (gameState !== 'gameover' || screenShake > 0) { // מצייר רק אם לא נפסל לגמרי (מלבד זמן הרעידה)
+                ctx.save();
+                ctx.translate(player.x + player.w/2, player.y + player.h/2);
+                if (!player.facingRight) ctx.scale(-1, 1); // הופך את הדמות שמאלה/ימינה
+                ctx.translate(-player.w/2, -player.h/2);
 
-            let moving = Math.abs(player.vx) > 0.5 && player.grounded;
-            let legOffset = moving ? Math.sin(Date.now() * 0.015) * 6 : 0;
-            
-            // יד אחורית
-            ctx.fillStyle = '#fca5a5';
-            ctx.fillRect(4 - legOffset/2, 20, 6, 6);
+                let moving = Math.abs(player.vx) > 0.5 && player.grounded;
+                let legOffset = moving ? Math.sin(Date.now() * 0.015) * 6 : 0;
+                
+                // יד אחורית
+                ctx.fillStyle = '#fca5a5';
+                ctx.fillRect(4 - legOffset/2, 20, 6, 6);
 
-            // רגליים מתנפנפות (סרבל)
-            ctx.fillStyle = '#1e3a8a';
-            ctx.fillRect(10 - legOffset, 30, 8, 8);
-            ctx.fillRect(22 + legOffset, 30, 8, 8);
+                // רגליים מתנפנפות (סרבל)
+                ctx.fillStyle = '#1e3a8a';
+                ctx.fillRect(10 - legOffset, 30, 8, 8);
+                ctx.fillRect(22 + legOffset, 30, 8, 8);
 
-            // נעליים
-            ctx.fillStyle = '#451a03';
-            ctx.fillRect(6 - legOffset, 36, 12, 6);
-            ctx.fillRect(18 + legOffset, 36, 12, 6);
+                // נעליים
+                ctx.fillStyle = '#451a03';
+                ctx.fillRect(6 - legOffset, 36, 12, 6);
+                ctx.fillRect(18 + legOffset, 36, 12, 6);
 
-            // חולצה אדומה (גוף)
-            ctx.fillStyle = '#ef4444';
-            ctx.fillRect(8, 16, 24, 14);
-            
-            // סרבל קדמי כחול
-            ctx.fillStyle = '#2563eb';
-            ctx.fillRect(12, 22, 16, 10);
-            
-            // כפתורי סרבל צהובים
-            ctx.fillStyle = '#fde047';
-            ctx.fillRect(12, 22, 4, 4);
-            ctx.fillRect(24, 22, 4, 4);
+                // חולצה אדומה (גוף)
+                ctx.fillStyle = '#ef4444';
+                ctx.fillRect(8, 16, 24, 14);
+                
+                // סרבל קדמי כחול
+                ctx.fillStyle = '#2563eb';
+                ctx.fillRect(12, 22, 16, 10);
+                
+                // כפתורי סרבל צהובים
+                ctx.fillStyle = '#fde047';
+                ctx.fillRect(12, 22, 4, 4);
+                ctx.fillRect(24, 22, 4, 4);
 
-            // יד קדמית
-            ctx.fillStyle = '#fca5a5';
-            ctx.fillRect(30 + legOffset/2, 20, 6, 6);
+                // יד קדמית
+                ctx.fillStyle = '#fca5a5';
+                ctx.fillRect(30 + legOffset/2, 20, 6, 6);
 
-            // ראש (צבע גוף)
-            ctx.fillStyle = '#fca5a5'; 
-            ctx.fillRect(10, 6, 20, 14);
-            
-            // אף
-            ctx.fillRect(26, 12, 6, 4);
-            
-            // עין
-            ctx.fillStyle = 'black';
-            ctx.fillRect(22, 8, 4, 6); 
-            
-            // שפם
-            ctx.fillRect(24, 14, 10, 4);
-            
-            // כובע אדום עם מצחיה
-            ctx.fillStyle = '#ef4444';
-            ctx.fillRect(8, 0, 22, 8);
-            ctx.fillRect(16, 0, 20, 4);
+                // ראש (צבע גוף)
+                ctx.fillStyle = '#fca5a5'; 
+                ctx.fillRect(10, 6, 20, 14);
+                
+                // אף
+                ctx.fillRect(26, 12, 6, 4);
+                
+                // עין
+                ctx.fillStyle = 'black';
+                ctx.fillRect(22, 8, 4, 6); 
+                
+                // שפם
+                ctx.fillRect(24, 14, 10, 4);
+                
+                // כובע אדום עם מצחיה
+                ctx.fillStyle = '#ef4444';
+                ctx.fillRect(8, 0, 22, 8);
+                ctx.fillRect(16, 0, 20, 4);
 
-            ctx.restore();
+                ctx.restore();
+            }
 
             // סיום הטרנספורמציה של המצלמה
             ctx.restore();
@@ -609,11 +851,14 @@
 
         // --- סיום המשחק (נצחון או הפסד) ---
         function gameOver(win) {
+            if (gameState !== 'playing') return; // מונע הפעלה כפולה
+            
             gameState = win ? 'won' : 'gameover';
             messageBox.classList.remove('hidden');
             
             if (win) {
-                if (currentLevel < 3) {
+                playSound('win');
+                if (currentLevel < 6) {
                     messageText.innerText = "סיימת את שלב " + currentLevel + "!";
                     messageText.className = "text-4xl sm:text-5xl font-extrabold text-green-500 mb-4";
                     restartBtn.innerText = "המשך לשלב הבא";
@@ -624,7 +869,11 @@
                 }
                 score += 100; // בונוס סיום
                 scoreDisplay.innerText = score;
+                createParticles(player.x + player.w/2, player.y + player.h/2, '#4ade80', 50, 2);
             } else {
+                playSound('die');
+                screenShake = 25; // רעידת מסך חזקה בפסילה
+                createParticles(player.x + player.w/2, player.y + player.h/2, '#ef4444', 30, 2); // פיצוץ אדום
                 messageText.innerText = "פסלת!";
                 messageText.className = "text-4xl sm:text-5xl font-extrabold text-red-500 mb-4";
                 restartBtn.innerText = "התחל שלב מחדש";
@@ -640,17 +889,34 @@
             animationFrameId = requestAnimationFrame(update);
         }
 
-        // --- אירועי מקלדת ---
-        window.addEventListener('keydown', (e) => {
+        // --- פונקציה משותפת לטיפול בקפיצה (כולל קפיצה כפולה) ---
+        function handleJump() {
             if (gameState !== 'playing') return;
-            if (e.code === 'ArrowLeft' || e.code === 'KeyA') { keys.left = true; player.facingRight = false; }
-            if (e.code === 'ArrowRight' || e.code === 'KeyD') { keys.right = true; player.facingRight = true; }
-            if ((e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') && !keys.up) {
-                keys.up = true;
+            if (!keys.up) { // רק אם המקש שוחרר מקודם
                 if (player.grounded) {
                     player.vy = player.jumpPower;
                     player.grounded = false;
+                    player.currentJumps = 1;
+                    playSound('jump');
+                    createParticles(player.x + player.w/2, player.y + player.h, '#ffffff', 5); // אבק
+                } else if (player.currentJumps < player.maxJumps) {
+                    player.vy = player.jumpPower * 0.85; // קפיצה כפולה קצת חלשה יותר
+                    player.currentJumps++;
+                    playSound('doubleJump');
+                    createParticles(player.x + player.w/2, player.y + player.h, '#60a5fa', 15); // אפקט כחלחל לקפיצה כפולה
                 }
+            }
+            keys.up = true;
+        }
+
+        // --- אירועי מקלדת ---
+        window.addEventListener('keydown', (e) => {
+            initAudio(); // אתחול מערכת הסאונד בלחיצה הראשונה
+            if (gameState !== 'playing') return;
+            if (e.code === 'ArrowLeft' || e.code === 'KeyA') { keys.left = true; player.facingRight = false; }
+            if (e.code === 'ArrowRight' || e.code === 'KeyD') { keys.right = true; player.facingRight = true; }
+            if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
+                handleJump();
             }
             if (e.code === 'KeyZ' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
                 shoot();
@@ -663,7 +929,7 @@
             if (e.code === 'ArrowUp' || e.code === 'Space' || e.code === 'KeyW') {
                 keys.up = false;
                 // קפיצה נמוכה אם עוזבים את המקש מוקדם
-                if (player.vy < 0) {
+                if (player.vy < 0 && player.currentJumps === 1) { // רק בקפיצה הראשונה מאפשרים קטיעה
                     player.vy *= 0.5;
                 }
             }
@@ -678,17 +944,14 @@
         function setupTouch(btn, keyName) {
             btn.addEventListener('touchstart', (e) => {
                 e.preventDefault(); // מונע התנהגות דפדפן רגילה (כמו זום)
+                initAudio();
                 if (gameState !== 'playing') return;
                 
                 if (keyName === 'left') player.facingRight = false;
                 if (keyName === 'right') player.facingRight = true;
 
                 if (keyName === 'up') {
-                    if (!keys.up && player.grounded) {
-                        player.vy = player.jumpPower;
-                        player.grounded = false;
-                    }
-                    keys.up = true;
+                    handleJump();
                 } else {
                     keys[keyName] = true;
                 }
@@ -696,7 +959,7 @@
             btn.addEventListener('touchend', (e) => {
                 e.preventDefault();
                 keys[keyName] = false;
-                if (keyName === 'up' && player.vy < 0) {
+                if (keyName === 'up' && player.vy < 0 && player.currentJumps === 1) {
                     player.vy *= 0.5;
                 }
             });
@@ -709,16 +972,18 @@
         if (btnShoot) {
             btnShoot.addEventListener('touchstart', (e) => {
                 e.preventDefault();
+                initAudio();
                 shoot();
             });
         }
 
         // כפתור התחלה מחדש
         restartBtn.addEventListener('click', () => {
+            initAudio();
             cancelAnimationFrame(animationFrameId);
-            if (gameState === 'won' && currentLevel < 3) {
-                loadLevel(currentLevel + 1); // עובר לשלב הבא
-            } else if (gameState === 'won' && currentLevel === 3) {
+            if (gameState === 'won' && currentLevel < 6) {
+                loadLevel(currentLevel + 1); // עובר לשלב הבא (עד שלב 6)
+            } else if (gameState === 'won' && currentLevel >= 6) {
                 score = 0; // ניצחון מוחלט - מתחיל מההתחלה
                 scoreDisplay.innerText = score;
                 loadLevel(1);
