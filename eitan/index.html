@@ -55,14 +55,14 @@
         </div>
 
         <!-- תחתון: כפתורי שליטה למובייל (מוסתרים במסכים גדולים) -->
-        <div class="flex justify-between items-end pb-4 sm:hidden pointer-events-auto opacity-70">
-            <div class="flex gap-4">
-                <button id="btnLeft" class="bg-gray-800 text-white w-20 h-20 rounded-full text-4xl font-bold flex justify-center items-center shadow-lg active:bg-gray-600 select-none">◄</button>
-                <button id="btnRight" class="bg-gray-800 text-white w-20 h-20 rounded-full text-4xl font-bold flex justify-center items-center shadow-lg active:bg-gray-600 select-none">►</button>
+        <div class="absolute bottom-0 left-0 w-full flex justify-between items-end p-4 pb-8 sm:hidden pointer-events-auto opacity-80" dir="ltr">
+            <div class="flex gap-2">
+                <button id="btnLeft" class="bg-gray-800 text-white w-16 h-16 rounded-full text-3xl font-bold flex justify-center items-center shadow-lg active:bg-gray-600 select-none">◄</button>
+                <button id="btnRight" class="bg-gray-800 text-white w-16 h-16 rounded-full text-3xl font-bold flex justify-center items-center shadow-lg active:bg-gray-600 select-none">►</button>
             </div>
-            <div class="flex gap-4">
-                <button id="btnShoot" class="bg-red-500 text-white w-20 h-20 rounded-full text-3xl font-bold flex justify-center items-center shadow-lg active:bg-red-400 select-none">🎯</button>
-                <button id="btnJump" class="bg-blue-600 text-white w-20 h-20 rounded-full text-4xl font-bold flex justify-center items-center shadow-lg active:bg-blue-400 select-none">▲</button>
+            <div class="flex gap-2">
+                <button id="btnShoot" class="bg-red-500 text-white w-16 h-16 rounded-full text-3xl font-bold flex justify-center items-center shadow-lg active:bg-red-400 select-none">🎯</button>
+                <button id="btnJump" class="bg-blue-600 text-white w-16 h-16 rounded-full text-3xl font-bold flex justify-center items-center shadow-lg active:bg-blue-400 select-none">▲</button>
             </div>
         </div>
     </div>
@@ -93,6 +93,7 @@
         let gameState = 'playing'; // 'playing', 'gameover', 'won'
         let score = 0;
         let cameraX = 0;
+        let cameraY = 0;
         let animationFrameId;
 
         // מקשים
@@ -130,7 +131,7 @@
             };
 
             // יצירת השלב (פלטפורמות)
-            const groundY = canvas.height - 100 > 500 ? canvas.height - 100 : 500; // רצפה בסיסית
+            const groundY = 500; // רצפה בסיסית וקבועה
             
             platforms = [
                 { x: 0, y: groundY, w: 1000, h: 200 }, // רצפה התחלתית
@@ -173,7 +174,13 @@
             };
 
             cameraX = 0;
+            cameraY = 0;
             update(); // התחלת לולאת המשחק
+        }
+
+        // --- פונקציית עזר לזום ---
+        function getZoom() {
+            return window.innerWidth < 800 ? window.innerWidth / 800 : 1;
         }
 
         // --- בדיקת התנגשות בין שני מלבנים ---
@@ -290,12 +297,15 @@
             }
 
             // עדכון יריות
+            let zoom = getZoom();
+            let logicalWidth = canvas.width / zoom;
+            
             for (let i = bullets.length - 1; i >= 0; i--) {
                 let b = bullets[i];
                 b.x += b.vx;
 
                 // הסרת ירייה אם יצאה מהמסך
-                if (b.x < cameraX - 100 || b.x > cameraX + canvas.width + 100) {
+                if (b.x < cameraX - 100 || b.x > cameraX + logicalWidth + 100) {
                     bullets.splice(i, 1);
                     continue;
                 }
@@ -335,14 +345,22 @@
             }
 
             // נפילה לתהום (נפסל)
-            if (player.y > canvas.height + 200) {
+            if (player.y > 1000) {
                 gameOver(false);
             }
 
-            // עדכון מצלמה - עוקבת אחרי השחקן
-            let targetCameraX = player.x - canvas.width / 3;
+            // עדכון מצלמה - עוקבת אחרי השחקן (תמיכה במצב אנכי)
+            let logicalHeight = canvas.height / zoom;
+            
+            let targetCameraX = player.x - logicalWidth / 3;
             if (targetCameraX < 0) targetCameraX = 0;
-            cameraX += (targetCameraX - cameraX) * 0.1; // תנועת מצלמה חלקה
+            cameraX += (targetCameraX - cameraX) * 0.1; 
+            
+            let targetCameraY = player.y - logicalHeight / 2;
+            // מגביל את המצלמה כדי שלא תרד מתחת לאדמה ותחשוף ריק
+            let maxCameraY = 500 + 200 - logicalHeight;
+            if (targetCameraY > maxCameraY) targetCameraY = maxCameraY;
+            cameraY += (targetCameraY - cameraY) * 0.1;
         }
 
         // --- ציור כל האלמנטים על המסך ---
@@ -352,7 +370,9 @@
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             ctx.save();
-            ctx.translate(-Math.floor(cameraX), 0); // הזזת עולם המשחק שמאלה כדי ליצור אפקט גלילה
+            let zoom = getZoom();
+            ctx.scale(zoom, zoom);
+            ctx.translate(-Math.floor(cameraX), -Math.floor(cameraY)); // הזזת עולם המשחק לרוחב ולגובה
 
             // ציור עננים ונוף (רקע)
             ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
